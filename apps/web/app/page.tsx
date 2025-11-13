@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
@@ -13,7 +14,10 @@ import { Template } from "@/types";
 import { getDefaultTemplate } from "@/lib/templates";
 import TemplateSelector from "@/components/TemplateSelector";
 import ExportButton from "@/components/ExportButton";
+import SaveButton from "@/components/SaveButton";
 import type { CanvasEditorHandle } from "@/components/CanvasEditor";
+import { useToast } from "@/hooks/use-toast";
+import { Button } from "@/components/ui/button";
 
 // Dynamically import CanvasEditor to avoid SSR issues with Konva
 const CanvasEditor = dynamic(() => import("@/components/CanvasEditor"), {
@@ -26,6 +30,8 @@ export default function Home() {
     getDefaultTemplate()
   );
   const [isExporting, setIsExporting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const { toast } = useToast();
 
   const handleTemplateChange = (template: Template) => {
     setSelectedTemplate(template);
@@ -51,6 +57,46 @@ export default function Home() {
     }
   };
 
+  const handleSave = async () => {
+    if (!canvasEditorHandleRef.current || isSaving || isExporting) return;
+
+    setIsSaving(true);
+    try {
+      // Get canvas data URL
+      const dataUrl = await canvasEditorHandleRef.current.getCanvasDataUrl();
+
+      // Send to save API
+      const response = await fetch("/api/save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          imageData: dataUrl,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast({
+          title: "Image saved successfully",
+          description: `Saved as ${result.filename}`,
+        });
+      } else {
+        throw new Error(result.error || "Failed to save image");
+      }
+    } catch (error) {
+      toast({
+        title: "Save error",
+        description: error instanceof Error ? error.message : "Failed to save image. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   // Sync exporting state from handle
   useEffect(() => {
     const interval = setInterval(() => {
@@ -65,14 +111,23 @@ export default function Home() {
     <main className="flex min-h-screen flex-col bg-white">
       {/* Top bar with Template Selector (left) and Export Button (right) */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-        <div className="flex items-center">
+        <div className="flex items-center gap-4">
           <TemplateSelector
             selectedTemplate={selectedTemplate}
             onTemplateChange={handleTemplateChange}
           />
+          <div className="flex items-center gap-2 ml-4">
+            <Link href="/gallery">
+              <Button variant="ghost" className="text-sm">Gallery</Button>
+            </Link>
+            <Link href="/settings">
+              <Button variant="ghost" className="text-sm">Settings</Button>
+            </Link>
+          </div>
         </div>
         <div className="flex items-center">
-          <ExportButton onExport={handleExport} disabled={isExporting} />
+          <ExportButton onExport={handleExport} disabled={isExporting || isSaving} />
+          <SaveButton onSave={handleSave} disabled={isSaving || isExporting} />
         </div>
       </div>
 

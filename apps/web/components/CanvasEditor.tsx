@@ -38,6 +38,7 @@ interface CanvasEditorProps {
 
 export interface CanvasEditorHandle {
   exportCanvas: () => Promise<void>;
+  getCanvasDataUrl: () => Promise<string>;
   isExporting: boolean;
 }
 
@@ -270,6 +271,107 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
     }, [template, scaleX, scaleY, toast, findSlotAtCanvasCoordinates]);
 
     /**
+     * Generate canvas as JPEG data URL at full resolution (3840×2160)
+     */
+    const generateCanvasDataUrl = async (): Promise<string> => {
+      // Create a temporary full-resolution stage
+      const exportStage = new Konva.Stage({
+        container: document.createElement("div"),
+        width: CANVAS_WIDTH,
+        height: CANVAS_HEIGHT,
+      });
+
+      const exportLayer = new Konva.Layer();
+      exportStage.add(exportLayer);
+
+      // Render background
+      const background = new Konva.Rect({
+        x: 0,
+        y: 0,
+        width: CANVAS_WIDTH,
+        height: CANVAS_HEIGHT,
+        fill: CANVAS_BACKGROUND_COLOR,
+      });
+      exportLayer.add(background);
+
+      // Load and render all images at full resolution
+      const imagePromises = Array.from(imageAssignments.entries()).map(
+        async ([slotId, assignment]) => {
+          const slot = template.slots.find((s) => s.id === slotId);
+          if (!slot) return null;
+
+          // Load image at full resolution
+          const image = await loadImageFromUrl(assignment.imageUrl);
+
+          // Convert slot percentage coordinates to canvas pixel coordinates
+          const slotX = (slot.x / 100) * CANVAS_WIDTH;
+          const slotY = (slot.y / 100) * CANVAS_HEIGHT;
+          const slotWidth = (slot.width / 100) * CANVAS_WIDTH;
+          const slotHeight = (slot.height / 100) * CANVAS_HEIGHT;
+
+          // Calculate image position and dimensions in canvas space
+          const imageWidth = image.width * assignment.scaleX;
+          const imageHeight = image.height * assignment.scaleY;
+          const imageX = slotX + assignment.x;
+          const imageY = slotY + assignment.y;
+
+          // Create clipping group for slot
+          const clipGroup = new Konva.Group({
+            clipX: slotX,
+            clipY: slotY,
+            clipWidth: slotWidth,
+            clipHeight: slotHeight,
+          });
+
+          // Create image node
+          const konvaImage = new Konva.Image({
+            image: image,
+            x: imageX,
+            y: imageY,
+            width: imageWidth,
+            height: imageHeight,
+          });
+
+          clipGroup.add(konvaImage);
+          exportLayer.add(clipGroup);
+
+          return clipGroup;
+        }
+      );
+
+      // Wait for all images to load and render
+      await Promise.all(imagePromises);
+
+      // Draw the layer to ensure everything is rendered
+      exportLayer.draw();
+
+      // Wait for the next animation frame to ensure images are fully rendered
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
+      // Generate JPEG data URL
+      const dataUrl = exportStage.toDataURL({
+        mimeType: "image/jpeg",
+        quality: 0.95,
+        pixelRatio: 1, // Use 1:1 pixel ratio for full resolution
+      });
+
+      // Cleanup
+      exportStage.destroy();
+
+      return dataUrl;
+    };
+
+    /**
+     * Get canvas as JPEG data URL at full resolution (3840×2160)
+     */
+    const getCanvasDataUrl = async (): Promise<string> => {
+      if (isExporting) {
+        throw new Error("Export already in progress");
+      }
+      return await generateCanvasDataUrl();
+    };
+
+    /**
      * Export canvas as JPEG at full resolution (3840×2160)
      */
     const exportCanvas = async (): Promise<void> => {
@@ -278,93 +380,11 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       setIsExporting(true);
 
       try {
-        // Create a temporary full-resolution stage
-        const exportStage = new Konva.Stage({
-          container: document.createElement("div"),
-          width: CANVAS_WIDTH,
-          height: CANVAS_HEIGHT,
-        });
-
-        const exportLayer = new Konva.Layer();
-        exportStage.add(exportLayer);
-
-        // Render background
-        const background = new Konva.Rect({
-          x: 0,
-          y: 0,
-          width: CANVAS_WIDTH,
-          height: CANVAS_HEIGHT,
-          fill: CANVAS_BACKGROUND_COLOR,
-        });
-        exportLayer.add(background);
-
-        // Load and render all images at full resolution
-        const imagePromises = Array.from(imageAssignments.entries()).map(
-          async ([slotId, assignment]) => {
-            const slot = template.slots.find((s) => s.id === slotId);
-            if (!slot) return null;
-
-            // Load image at full resolution
-            const image = await loadImageFromUrl(assignment.imageUrl);
-
-            // Convert slot percentage coordinates to canvas pixel coordinates
-            const slotX = (slot.x / 100) * CANVAS_WIDTH;
-            const slotY = (slot.y / 100) * CANVAS_HEIGHT;
-            const slotWidth = (slot.width / 100) * CANVAS_WIDTH;
-            const slotHeight = (slot.height / 100) * CANVAS_HEIGHT;
-
-            // Calculate image position and dimensions in canvas space
-            const imageWidth = image.width * assignment.scaleX;
-            const imageHeight = image.height * assignment.scaleY;
-            const imageX = slotX + assignment.x;
-            const imageY = slotY + assignment.y;
-
-            // Create clipping group for slot
-            const clipGroup = new Konva.Group({
-              clipX: slotX,
-              clipY: slotY,
-              clipWidth: slotWidth,
-              clipHeight: slotHeight,
-            });
-
-            // Create image node
-            const konvaImage = new Konva.Image({
-              image: image,
-              x: imageX,
-              y: imageY,
-              width: imageWidth,
-              height: imageHeight,
-            });
-
-            clipGroup.add(konvaImage);
-            exportLayer.add(clipGroup);
-
-            return clipGroup;
-          }
-        );
-
-        // Wait for all images to load and render
-        await Promise.all(imagePromises);
-
-        // Draw the layer to ensure everything is rendered
-        exportLayer.draw();
-
-        // Wait for the next animation frame to ensure images are fully rendered
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-
-        // Generate JPEG data URL
-        const dataUrl = exportStage.toDataURL({
-          mimeType: "image/jpeg",
-          quality: 0.95,
-          pixelRatio: 1, // Use 1:1 pixel ratio for full resolution
-        });
+        const dataUrl = await generateCanvasDataUrl();
 
         // Generate filename and download
         const filename = generateExportFilename();
         downloadDataUrl(dataUrl, filename);
-
-        // Cleanup
-        exportStage.destroy();
 
         toast({
           title: "Export successful",
@@ -456,12 +476,13 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
     // Expose export function and state via ref
     useImperativeHandle(ref, () => ({
       exportCanvas,
+      getCanvasDataUrl,
       isExporting,
     }));
 
     // Also expose via callback for dynamic import compatibility
-    const handleRef = useRef({ exportCanvas, isExporting });
-    handleRef.current = { exportCanvas, isExporting };
+    const handleRef = useRef({ exportCanvas, getCanvasDataUrl, isExporting });
+    handleRef.current = { exportCanvas, getCanvasDataUrl, isExporting };
     
     useEffect(() => {
       if (onExportReady) {
