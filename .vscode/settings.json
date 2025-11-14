@@ -45,7 +45,9 @@
         "**/Thumbs.db": true,
         "**/.ipynb_checkpoints": true,
         "**/profile_default": true,
-        "**/ipython_config.py": true
+        "**/ipython_config.py": true,
+        "**/.next": true,
+        "**/next-env.d.ts": true
     },
     "search.exclude": {
         "**/__pycache__": true,
@@ -94,7 +96,9 @@
         "**/.ipynb_checkpoints": true,
         "**/profile_default": true,
         "**/ipython_config.py": true,
-        "**/data": true
+        "**/data": true,
+        "**/.next": true,
+        "**/next-env.d.ts": true
     },
     "files.watcherExclude": {
         "**/__pycache__/**": true,
@@ -143,7 +147,9 @@
         "**/.ipynb_checkpoints/**": true,
         "**/profile_default/**": true,
         "**/ipython_config.py": true,
-        "**/data/**": true
+        "**/data/**": true,
+        "**/.next/**": true,
+        "**/next-env.d.ts": true
     },
     "editor.rulers": [
         100
@@ -164,7 +170,7 @@
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
             "source.organizeImports": "explicit"
-        },
+        }
     },
     "ruff.enable": true,
     "ruff.organizeImports": true,

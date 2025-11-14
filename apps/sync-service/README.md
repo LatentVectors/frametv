@@ -5,6 +5,7 @@ A FastAPI service for syncing images to Samsung Frame TV.
 ## Overview
 
 This service handles the communication with Samsung Frame TVs to:
+
 - Connect and authorize with the TV
 - Upload images to Art Mode
 - Configure slideshow settings
@@ -18,32 +19,46 @@ This service handles the communication with Samsung Frame TVs to:
 ## Installation
 
 1. Navigate to the sync service directory:
+
 ```bash
 cd apps/sync-service
 ```
 
-2. Install dependencies:
+2. Create and activate a virtual environment (recommended):
+
 ```bash
-pip install -r requirements.txt
+python3.12 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
+
+3. Install dependencies:
+
+```bash
+pip install fastapi uvicorn[standard] samsungtvws[async,encrypted] pydantic
+```
+
+Alternatively, dependencies are specified in `pyproject.toml` for reference.
 
 ## Running the Service
 
 ### Option 1: Using Python directly
+
 ```bash
-python main.py
+python src/main.py
 ```
 
 ### Option 2: Using uvicorn directly
+
 ```bash
-uvicorn main:app --port 8000
+uvicorn src.main:app --port 8000
 ```
 
 ### Option 3: From project root
+
 ```bash
-cd apps/sync-service && python main.py
+cd apps/sync-service && python src/main.py
 # or
-uvicorn apps.sync-service.main:app --port 8000
+uvicorn apps.sync-service.src.main:app --port 8000
 ```
 
 ## Configuration
@@ -53,15 +68,17 @@ uvicorn apps.sync-service.main:app --port 8000
 The service runs on port 8000 by default. You can change this by setting the `SYNC_SERVICE_PORT` environment variable:
 
 ```bash
-SYNC_SERVICE_PORT=8001 python main.py
+SYNC_SERVICE_PORT=8001 python src/main.py
 ```
 
 ## API Endpoints
 
 ### `GET /`
+
 Health check endpoint.
 
 **Response:**
+
 ```json
 {
   "status": "ok",
@@ -70,9 +87,11 @@ Health check endpoint.
 ```
 
 ### `GET /health`
+
 Health check endpoint.
 
 **Response:**
+
 ```json
 {
   "status": "healthy"
@@ -80,9 +99,11 @@ Health check endpoint.
 ```
 
 ### `POST /connect`
+
 Initiate TV connection and check if PIN is required.
 
 **Request Body:**
+
 ```json
 {
   "ip_address": "192.168.1.100",
@@ -91,6 +112,7 @@ Initiate TV connection and check if PIN is required.
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -100,9 +122,11 @@ Initiate TV connection and check if PIN is required.
 ```
 
 ### `POST /authorize`
+
 Complete TV authorization with PIN and save token.
 
 **Request Body:**
+
 ```json
 {
   "ip_address": "192.168.1.100",
@@ -112,6 +136,7 @@ Complete TV authorization with PIN and save token.
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -121,15 +146,14 @@ Complete TV authorization with PIN and save token.
 ```
 
 ### `POST /sync`
+
 Sync images to TV with specified slideshow timer.
 
 **Request Body:**
+
 ```json
 {
-  "image_paths": [
-    "/path/to/image1.jpg",
-    "/path/to/image2.jpg"
-  ],
+  "image_paths": ["/path/to/image1.jpg", "/path/to/image2.jpg"],
   "timer": "15m",
   "ip_address": "192.168.1.100",
   "port": 8002
@@ -137,6 +161,7 @@ Sync images to TV with specified slideshow timer.
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -165,6 +190,7 @@ The token file will be created automatically after successful authorization and 
 ## Error Handling
 
 The service includes comprehensive error handling:
+
 - Connection failures return appropriate error messages
 - Failed image uploads are tracked and reported
 - Partial sync success is handled gracefully
@@ -172,22 +198,27 @@ The service includes comprehensive error handling:
 ## Troubleshooting
 
 ### Service won't start
+
 - Check that Python 3.12+ is installed
-- Verify all dependencies are installed: `pip install -r requirements.txt`
+- Verify virtual environment is activated and dependencies are installed
 - Check if port 8000 is already in use
+- Ensure you're running from the correct directory or using the correct module path (`src.main`)
 
 ### Can't connect to TV
+
 - Ensure TV and computer are on the same Wi-Fi network
 - Verify TV IP address is correct
 - Check TV is powered on and in Art Mode capable state
 - Ensure firewall isn't blocking connections
 
 ### Authorization fails
+
 - Make sure PIN is entered correctly
 - Check that TV is displaying the PIN prompt
 - Try deleting `../../data/tv_token.txt` and re-authorizing
 
 ### Images fail to upload
+
 - Verify image files exist and are readable
 - Check image format is supported (JPEG or PNG)
 - Ensure TV has sufficient storage space
@@ -195,15 +226,32 @@ The service includes comprehensive error handling:
 
 ## Development
 
+### Project Structure
+
+```
+sync-service/
+├── pyproject.toml      # Python 3.12 requirement and dependencies
+├── README.md
+├── .venv/              # Virtual environment (gitignored)
+└── src/
+    ├── main.py         # FastAPI application
+    ├── models.py       # Pydantic models
+    └── tv_sync.py      # TV synchronization logic
+```
+
+### Dependencies
+
 The service uses:
+
 - **FastAPI** for the web framework
 - **samsungtvws** for TV communication
 - **Pydantic** for data validation
 - **uvicorn** as the ASGI server
+
+All dependencies are specified in `pyproject.toml` with Python 3.12 requirement.
 
 ## Notes
 
 - The service must run on the same machine as the Next.js app (localhost communication)
 - Token file is stored at `./data/tv_token.txt` relative to project root
 - Both Next.js app and sync service access the shared `./data/` directory
-

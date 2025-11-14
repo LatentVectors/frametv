@@ -1,0 +1,18 @@
+[project]
+name = "sync-service"
+version = "1.0.0"
+description = "FastAPI sync service for syncing images to Samsung Frame TV"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "samsungtvws[async,encrypted]>=2.4.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.4.0", "httpx>=0.24.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
