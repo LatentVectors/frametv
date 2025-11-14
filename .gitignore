@@ -10,6 +10,11 @@ coverage/
 *.lcov
 .nyc_output
 
+# Playwright
+test-results/
+playwright-report/
+.last-run.json
+
 # Next.js
 .next/
 out/
@@ -77,4 +82,6 @@ lerna-debug.log*
 .cache/
 
 # Application data
-/data/
+data/
+data/.test/
+# Note: data/.test/ contains test artifacts and is also ignored via data/

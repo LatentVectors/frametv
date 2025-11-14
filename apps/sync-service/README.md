@@ -8,7 +8,6 @@ This service handles the communication with Samsung Frame TVs to:
 
 - Connect and authorize with the TV
 - Upload images to Art Mode
-- Configure slideshow settings
 
 ## Prerequisites
 
@@ -147,14 +146,13 @@ Complete TV authorization with PIN and save token.
 
 ### `POST /sync`
 
-Sync images to TV with specified slideshow timer.
+Sync images to TV.
 
 **Request Body:**
 
 ```json
 {
   "image_paths": ["/path/to/image1.jpg", "/path/to/image2.jpg"],
-  "timer": "15m",
   "ip_address": "192.168.1.100",
   "port": 8002
 }

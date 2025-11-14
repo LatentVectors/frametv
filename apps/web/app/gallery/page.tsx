@@ -4,13 +4,6 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 
 interface GalleryImage {
@@ -40,18 +33,6 @@ interface SyncResponse {
   error?: string;
 }
 
-const TIMER_OPTIONS = [
-  { value: "3m", label: "3 minutes" },
-  { value: "5m", label: "5 minutes" },
-  { value: "10m", label: "10 minutes" },
-  { value: "15m", label: "15 minutes" },
-  { value: "1h", label: "1 hour" },
-  { value: "3h", label: "3 hours" },
-  { value: "6h", label: "6 hours" },
-  { value: "12h", label: "12 hours" },
-  { value: "24h", label: "24 hours" },
-];
-
 export default function GalleryPage() {
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,43 +41,45 @@ export default function GalleryPage() {
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
-  const [timer, setTimer] = useState("15m");
   const [syncing, setSyncing] = useState(false);
   const [tvConfigured, setTvConfigured] = useState<boolean | null>(null);
   const observerTarget = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  const loadImages = useCallback(async (pageNum: number, append: boolean = false) => {
-    try {
-      if (pageNum === 1) {
-        setLoading(true);
-      } else {
-        setLoadingMore(true);
-      }
-      setError(null);
+  const loadImages = useCallback(
+    async (pageNum: number, append: boolean = false) => {
+      try {
+        if (pageNum === 1) {
+          setLoading(true);
+        } else {
+          setLoadingMore(true);
+        }
+        setError(null);
 
-      const response = await fetch(`/api/gallery?page=${pageNum}&limit=50`);
-      if (!response.ok) {
-        throw new Error("Failed to load images");
-      }
+        const response = await fetch(`/api/gallery?page=${pageNum}&limit=50`);
+        if (!response.ok) {
+          throw new Error("Failed to load images");
+        }
 
-      const data: GalleryResponse = await response.json();
-      
-      if (append) {
-        setImages((prev) => [...prev, ...data.images]);
-      } else {
-        setImages(data.images);
+        const data: GalleryResponse = await response.json();
+
+        if (append) {
+          setImages((prev) => [...prev, ...data.images]);
+        } else {
+          setImages(data.images);
+        }
+
+        setHasMore(data.hasMore);
+        setPage(pageNum);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load images");
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
       }
-      
-      setHasMore(data.hasMore);
-      setPage(pageNum);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load images");
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
     loadImages(1);
@@ -189,7 +172,6 @@ export default function GalleryPage() {
         },
         body: JSON.stringify({
           imagePaths: selectedFilepaths,
-          timer: timer,
         }),
       });
 
@@ -198,13 +180,15 @@ export default function GalleryPage() {
       if (!response.ok || !data.success) {
         // Handle errors
         const errorMessage = data.error || "Failed to sync images";
-        
+
         if (data.failed && data.failed.length > 0) {
           // Partial success - show failed images
           const failedList = data.failed.map((f) => f.filename).join(", ");
           toast({
             title: "Sync completed with errors",
-            description: `${data.successful || 0} images synced successfully. Failed: ${failedList}`,
+            description: `${
+              data.successful || 0
+            } images synced successfully. Failed: ${failedList}`,
             variant: "destructive",
           });
         } else {
@@ -219,12 +203,15 @@ export default function GalleryPage() {
       }
 
       // Success handling
-      const syncedCount = data.synced?.length || data.successful || selectedImages.size;
+      const syncedCount =
+        data.synced?.length || data.successful || selectedImages.size;
       const failedCount = data.failed?.length || 0;
 
       if (failedCount > 0) {
         // Partial success
-        const failedList = data.failed.map((f) => `${f.filename} (${f.error})`).join(", ");
+        const failedList = data.failed
+          .map((f) => `${f.filename} (${f.error})`)
+          .join(", ");
         toast({
           title: "Sync completed with some errors",
           description: `${syncedCount} images synced successfully. ${failedCount} failed: ${failedList}`,
@@ -234,13 +221,16 @@ export default function GalleryPage() {
         // Complete success
         toast({
           title: "Sync successful",
-          description: `Successfully synced ${syncedCount} ${syncedCount === 1 ? "image" : "images"} to TV`,
+          description: `Successfully synced ${syncedCount} ${
+            syncedCount === 1 ? "image" : "images"
+          } to TV`,
         });
         // Clear selection after successful sync
         setSelectedImages(new Set());
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to sync images";
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to sync images";
       toast({
         title: "Sync error",
         description: errorMessage,
@@ -284,20 +274,9 @@ export default function GalleryPage() {
           {selectedCount > 0 && (
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-600">
-                {selectedCount} {selectedCount === 1 ? "image" : "images"} selected
+                {selectedCount} {selectedCount === 1 ? "image" : "images"}{" "}
+                selected
               </span>
-              <Select value={timer} onValueChange={setTimer}>
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {TIMER_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
               <Button
                 variant="default"
                 onClick={handleSync}
@@ -309,7 +288,9 @@ export default function GalleryPage() {
                     Syncing...
                   </>
                 ) : (
-                  `Sync ${selectedCount} ${selectedCount === 1 ? "Image" : "Images"}`
+                  `Sync ${selectedCount} ${
+                    selectedCount === 1 ? "Image" : "Images"
+                  }`
                 )}
               </Button>
             </div>
@@ -355,7 +336,9 @@ export default function GalleryPage() {
       {/* Gallery content */}
       {images.length === 0 ? (
         <div className="flex items-center justify-center min-h-[60vh]">
-          <p className="text-gray-500">No images saved yet. Create some in the editor!</p>
+          <p className="text-gray-500">
+            No images saved yet. Create some in the editor!
+          </p>
         </div>
       ) : (
         <>
@@ -368,10 +351,7 @@ export default function GalleryPage() {
               {images.map((image) => {
                 const isSelected = selectedImages.has(image.filename);
                 return (
-                  <div
-                    key={image.filename}
-                    className="mb-4 break-inside-avoid"
-                  >
+                  <div key={image.filename} className="mb-4 break-inside-avoid">
                     <div
                       className={`relative group cursor-pointer rounded-lg overflow-hidden bg-gray-100 border-2 transition-all ${
                         isSelected
@@ -425,4 +405,3 @@ export default function GalleryPage() {
     </div>
   );
 }
-

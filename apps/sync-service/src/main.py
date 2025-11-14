@@ -1,6 +1,7 @@
 """
 FastAPI sync service for syncing images to Samsung Frame TV.
 """
+
 import os
 import logging
 from fastapi import FastAPI, HTTPException
@@ -14,7 +15,17 @@ from models import (
     SyncResponse,
     FailedImage,
 )
-from tv_sync import initiate_connection, authorize_with_pin, sync_images_to_tv
+
+# Initialize TV mocking if MOCK_TV is enabled (must happen before importing tv_sync)
+if os.getenv("MOCK_TV", "").lower() == "true":
+    from tv_mock import setup_tv_mock  # noqa: E402
+
+    setup_tv_mock()
+    logging.getLogger(__name__).info(
+        "TV mocking enabled via MOCK_TV environment variable"
+    )
+
+from tv_sync import initiate_connection, authorize_with_pin, sync_images_to_tv  # noqa: E402
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -55,7 +66,7 @@ async def health():
 async def connect(request: ConnectRequest):
     """
     Initiate TV connection and check if PIN is required.
-    
+
     This endpoint attempts to connect to the TV and determines
     if a PIN is needed for authorization.
     """
@@ -64,7 +75,7 @@ async def connect(request: ConnectRequest):
         success, requires_pin, message = initiate_connection(
             request.ip_address, request.port
         )
-        
+
         return ConnectResponse(
             success=success,
             requires_pin=requires_pin,
@@ -72,17 +83,14 @@ async def connect(request: ConnectRequest):
         )
     except Exception as e:
         logger.error(f"Error in connect endpoint: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Connection error: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Connection error: {str(e)}")
 
 
 @app.post("/authorize", response_model=AuthorizeResponse)
 async def authorize(request: AuthorizeRequest):
     """
     Complete TV authorization with PIN and save token.
-    
+
     This endpoint completes the authorization process by providing
     the PIN displayed on the TV. The token is saved for future use.
     """
@@ -93,7 +101,7 @@ async def authorize(request: AuthorizeRequest):
             request.port,
             request.pin,
         )
-        
+
         return AuthorizeResponse(
             success=success,
             token_saved=token_saved,
@@ -101,42 +109,36 @@ async def authorize(request: AuthorizeRequest):
         )
     except Exception as e:
         logger.error(f"Error in authorize endpoint: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Authorization error: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Authorization error: {str(e)}")
 
 
 @app.post("/sync", response_model=SyncResponse)
 async def sync(request: SyncRequest):
     """
-    Sync selected images to TV with specified slideshow timer.
-    
+    Sync selected images to TV.
+
     This endpoint:
     1. Connects to the TV using saved token
     2. Turns on Art Mode
     3. Uploads each image with matte='none'
-    4. Sets the slideshow timer
     """
     try:
         logger.info(
             f"Sync request for {len(request.image_paths)} images "
-            f"to {request.ip_address}:{request.port} with timer {request.timer}"
+            f"to {request.ip_address}:{request.port}"
         )
-        
+
         success, synced, failed_dicts, total, successful = sync_images_to_tv(
             request.image_paths,
-            request.timer,
             request.ip_address,
             request.port,
         )
-        
+
         # Convert failed dicts to FailedImage models
         failed = [
-            FailedImage(filename=f["filename"], error=f["error"])
-            for f in failed_dicts
+            FailedImage(filename=f["filename"], error=f["error"]) for f in failed_dicts
         ]
-        
+
         return SyncResponse(
             success=success,
             synced=synced,
@@ -146,14 +148,11 @@ async def sync(request: SyncRequest):
         )
     except Exception as e:
         logger.error(f"Error in sync endpoint: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Sync error: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Sync error: {str(e)}")
 
 
 if __name__ == "__main__":
     import uvicorn
+
     logger.info(f"Starting sync service on port {PORT}")
     uvicorn.run(app, host="0.0.0.0", port=PORT)
-

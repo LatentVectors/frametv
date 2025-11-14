@@ -1,3 +1,6 @@
+data/
+data/.test/
+
 # Dependencies
 node_modules/
 .pnp

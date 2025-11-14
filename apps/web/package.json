@@ -8,7 +8,9 @@
     "dev:sync": "cd ../sync-service && .venv/bin/python src/main.py",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:e2e": "MOCK_TV=true MOCK_TV_SCENARIO=success_with_pin playwright test",
+    "test:e2e:ui": "MOCK_TV=true MOCK_TV_SCENARIO=success_with_pin playwright test --ui"
   },
   "dependencies": {
     "@radix-ui/react-select": "^2.2.6",
@@ -26,6 +28,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.40.0",
     "@types/node": "^20.14.12",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

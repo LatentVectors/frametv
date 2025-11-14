@@ -3,23 +3,17 @@ import { readSettings } from "@/lib/settingsUtils";
 import path from "path";
 import { getSavedImagesDirectory } from "@/lib/dataUtils";
 
-const SYNC_SERVICE_URL = process.env.SYNC_SERVICE_URL || "http://localhost:8000";
+const SYNC_SERVICE_URL =
+  process.env.SYNC_SERVICE_URL || "http://localhost:8000";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { imagePaths, timer } = body;
+    const { imagePaths } = body;
 
     if (!imagePaths || !Array.isArray(imagePaths) || imagePaths.length === 0) {
       return NextResponse.json(
         { success: false, synced: [], failed: [], error: "No images selected" },
-        { status: 400 }
-      );
-    }
-
-    if (!timer) {
-      return NextResponse.json(
-        { success: false, synced: [], failed: [], error: "Timer is required" },
         { status: 400 }
       );
     }
@@ -58,7 +52,6 @@ export async function POST(request: NextRequest) {
       },
       body: JSON.stringify({
         image_paths: fullImagePaths,
-        timer: timer,
         ip_address: settings.ipAddress,
         port: settings.port,
       }),
@@ -75,7 +68,8 @@ export async function POST(request: NextRequest) {
               filename: p.split(/[/\\]/).pop() || p,
               error: "Sync service is not running",
             })),
-            error: "Sync service is not running. Please start the sync service and try again.",
+            error:
+              "Sync service is not running. Please start the sync service and try again.",
           },
           { status: 503 }
         );
@@ -113,7 +107,8 @@ export async function POST(request: NextRequest) {
           success: false,
           synced: [],
           failed: [],
-          error: "Sync service is not running. Please start the sync service and try again.",
+          error:
+            "Sync service is not running. Please start the sync service and try again.",
         },
         { status: 503 }
       );
@@ -131,4 +126,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
