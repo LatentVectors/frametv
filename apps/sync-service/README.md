@@ -70,6 +70,44 @@ The service runs on port 8000 by default. You can change this by setting the `SY
 SYNC_SERVICE_PORT=8001 python src/main.py
 ```
 
+## TV Pairing
+
+Before you can sync images to your Samsung Frame TV, you need to pair the sync service with your TV.
+
+### Prerequisites
+
+- Your TV must be on and connected to the same network as your sync service
+- You need to know your TV's IP address (find it in TV Settings > General > Network > Network Status)
+
+### Pairing Steps
+
+1. Make sure your TV settings are saved in the web app (Settings page)
+
+2. Run the pairing CLI tool:
+
+   ```bash
+   cd apps/sync-service
+   python src/pair_tv.py
+   ```
+
+   Or specify the IP address directly:
+
+   ```bash
+   python src/pair_tv.py --ip 192.168.1.100
+   ```
+
+3. Check your TV screen - a PIN will be displayed
+
+4. Enter the PIN in the terminal when prompted
+
+5. If successful, the authentication token will be saved and you can start syncing images
+
+### Troubleshooting
+
+- **"Connection refused"**: Make sure your TV is on and connected to the network
+- **"Invalid PIN"**: Run the command again and carefully enter the PIN displayed on your TV
+- **TV doesn't show PIN**: Make sure your TV supports the Frame TV features and is connected properly
+
 ## API Endpoints
 
 ### `GET /`
@@ -94,53 +132,6 @@ Health check endpoint.
 ```json
 {
   "status": "healthy"
-}
-```
-
-### `POST /connect`
-
-Initiate TV connection and check if PIN is required.
-
-**Request Body:**
-
-```json
-{
-  "ip_address": "192.168.1.100",
-  "port": 8002
-}
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "requires_pin": true,
-  "message": "Please enter the PIN displayed on your TV"
-}
-```
-
-### `POST /authorize`
-
-Complete TV authorization with PIN and save token.
-
-**Request Body:**
-
-```json
-{
-  "ip_address": "192.168.1.100",
-  "port": 8002,
-  "pin": "1234"
-}
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "token_saved": true,
-  "message": "Successfully authorized with Frame TV"
 }
 ```
 
@@ -172,18 +163,9 @@ Sync images to TV.
 
 ## Token Management
 
-The service automatically saves the TV authentication token to `../../data/tv_token.txt` (relative to the sync service directory, which resolves to `./data/tv_token.txt` at the project root).
+The pairing CLI tool saves the TV authentication token to `../../data/tv_token.txt` (relative to the sync service directory, which resolves to `./data/tv_token.txt` at the project root).
 
-After the first successful authorization, you won't need to enter the PIN again unless the token expires or is deleted.
-
-### PIN Authorization Note
-
-The `samsungtvws` library handles PIN authorization automatically when the token file doesn't exist. However, the library may require interactive PIN entry via console for the initial authorization. If the `/authorize` endpoint doesn't work programmatically, you may need to:
-
-1. Run a one-time authorization script interactively to generate the token file
-2. Once the token file exists, the service will use it automatically for all subsequent connections
-
-The token file will be created automatically after successful authorization and can be reused for future connections.
+After the first successful pairing, you won't need to enter the PIN again unless the token expires or is deleted. The sync service will automatically use the saved token for all sync operations.
 
 ## Error Handling
 
@@ -209,11 +191,11 @@ The service includes comprehensive error handling:
 - Check TV is powered on and in Art Mode capable state
 - Ensure firewall isn't blocking connections
 
-### Authorization fails
+### Pairing fails
 
 - Make sure PIN is entered correctly
 - Check that TV is displaying the PIN prompt
-- Try deleting `../../data/tv_token.txt` and re-authorizing
+- Try deleting `../../data/tv_token.txt` and running the pairing CLI tool again
 
 ### Images fail to upload
 
@@ -234,7 +216,8 @@ sync-service/
 └── src/
     ├── main.py         # FastAPI application
     ├── models.py       # Pydantic models
-    └── tv_sync.py      # TV synchronization logic
+    ├── tv_sync.py      # TV synchronization logic
+    └── pair_tv.py      # CLI tool for TV pairing
 ```
 
 ### Dependencies
@@ -245,6 +228,7 @@ The service uses:
 - **samsungtvws** for TV communication
 - **Pydantic** for data validation
 - **uvicorn** as the ASGI server
+- **typer** for CLI interface (pairing tool)
 
 All dependencies are specified in `pyproject.toml` with Python 3.12 requirement.
 

@@ -1,15 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readSettings, writeSettings, isConfigured } from "@/lib/settingsUtils";
+import fs from "fs";
+import path from "path";
+import { getDataDirectory } from "@/lib/dataUtils";
+
+function checkTokenExists(): boolean {
+  try {
+    const dataDir = getDataDirectory();
+    const tokenPath = path.join(dataDir, "tv_token.txt");
+    return fs.existsSync(tokenPath);
+  } catch (error) {
+    console.error("Error checking token file:", error);
+    return false;
+  }
+}
 
 export async function GET() {
   try {
     const settings = readSettings();
     const configured = isConfigured();
+    const isPaired = checkTokenExists();
 
     return NextResponse.json({
       ipAddress: settings?.ipAddress,
       port: settings?.port,
       isConfigured: configured,
+      isPaired,
+      pairingInstructions:
+        "Run 'python src/pair_tv.py' from the sync-service directory",
     });
   } catch (error) {
     console.error("Error reading settings:", error);
@@ -61,4 +79,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

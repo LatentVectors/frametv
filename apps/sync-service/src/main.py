@@ -7,10 +7,6 @@ import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from models import (
-    ConnectRequest,
-    ConnectResponse,
-    AuthorizeRequest,
-    AuthorizeResponse,
     SyncRequest,
     SyncResponse,
     FailedImage,
@@ -25,7 +21,7 @@ if os.getenv("MOCK_TV", "").lower() == "true":
         "TV mocking enabled via MOCK_TV environment variable"
     )
 
-from tv_sync import initiate_connection, authorize_with_pin, sync_images_to_tv  # noqa: E402
+from tv_sync import sync_images_to_tv  # noqa: E402
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -60,56 +56,6 @@ async def root():
 async def health():
     """Health check endpoint."""
     return {"status": "healthy"}
-
-
-@app.post("/connect", response_model=ConnectResponse)
-async def connect(request: ConnectRequest):
-    """
-    Initiate TV connection and check if PIN is required.
-
-    This endpoint attempts to connect to the TV and determines
-    if a PIN is needed for authorization.
-    """
-    try:
-        logger.info(f"Connect request for {request.ip_address}:{request.port}")
-        success, requires_pin, message = initiate_connection(
-            request.ip_address, request.port
-        )
-
-        return ConnectResponse(
-            success=success,
-            requires_pin=requires_pin,
-            message=message,
-        )
-    except Exception as e:
-        logger.error(f"Error in connect endpoint: {e}")
-        raise HTTPException(status_code=500, detail=f"Connection error: {str(e)}")
-
-
-@app.post("/authorize", response_model=AuthorizeResponse)
-async def authorize(request: AuthorizeRequest):
-    """
-    Complete TV authorization with PIN and save token.
-
-    This endpoint completes the authorization process by providing
-    the PIN displayed on the TV. The token is saved for future use.
-    """
-    try:
-        logger.info(f"Authorize request for {request.ip_address}:{request.port}")
-        success, token_saved, message = authorize_with_pin(
-            request.ip_address,
-            request.port,
-            request.pin,
-        )
-
-        return AuthorizeResponse(
-            success=success,
-            token_saved=token_saved,
-            message=message,
-        )
-    except Exception as e:
-        logger.error(f"Error in authorize endpoint: {e}")
-        raise HTTPException(status_code=500, detail=f"Authorization error: {str(e)}")
 
 
 @app.post("/sync", response_model=SyncResponse)

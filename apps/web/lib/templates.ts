@@ -9,6 +9,24 @@ import {
 } from "./config";
 
 /**
+ * Template 0: Full Screen Image
+ * 1 slot covering entire canvas with no margins
+ */
+const fullScreenImageTemplate: Template = {
+  id: "full-screen",
+  name: "Full Screen",
+  slots: [
+    {
+      id: "fullscreen-1",
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+    },
+  ],
+};
+
+/**
  * Template 1: Single Image
  * 1 slot covering entire canvas minus margins
  */
@@ -275,6 +293,7 @@ const mirroredSquareGridTemplate: Template = {
  * Array of all available templates
  */
 export const templates: Template[] = [
+  fullScreenImageTemplate,
   singleImageTemplate,
   twoImagesTemplate,
   triptychTemplate,
