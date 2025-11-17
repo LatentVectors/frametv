@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 import sharp from "sharp";
-import {
-  getAlbumsDirectory,
-  getSavedImagesDirectory,
-} from "@/lib/dataUtils";
+import { getAlbumsDirectory, getSavedImagesDirectory } from "@/lib/dataUtils";
 
 function isPathInsideDirectory(directory: string, targetPath: string): boolean {
   const relativePath = path.relative(directory, targetPath);
@@ -92,7 +89,9 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("Error serving gallery image:", error);
-    return NextResponse.json({ error: "Failed to serve image" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to serve image" },
+      { status: 500 }
+    );
   }
 }
-
