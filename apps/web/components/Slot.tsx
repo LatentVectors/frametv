@@ -42,7 +42,6 @@ function Slot({
       height={height}
       stroke={strokeColor}
       strokeWidth={strokeWidth}
-      dash={[5, 5]} // Dashed border
       fill="transparent"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}

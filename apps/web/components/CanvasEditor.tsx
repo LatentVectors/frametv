@@ -611,6 +611,29 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
                 />
               );
             })}
+            {/* Render selection border on top of everything */}
+            {selectedSlotId && (() => {
+              const selectedSlot = template.slots.find((s) => s.id === selectedSlotId);
+              if (!selectedSlot) return null;
+              
+              const slotX = (selectedSlot.x / 100) * CANVAS_WIDTH * scaleX;
+              const slotY = (selectedSlot.y / 100) * CANVAS_HEIGHT * scaleY;
+              const slotWidth = (selectedSlot.width / 100) * CANVAS_WIDTH * scaleX;
+              const slotHeight = (selectedSlot.height / 100) * CANVAS_HEIGHT * scaleY;
+              
+              return (
+                <Rect
+                  x={slotX}
+                  y={slotY}
+                  width={slotWidth}
+                  height={slotHeight}
+                  stroke="#3b82f6"
+                  strokeWidth={3}
+                  fill="transparent"
+                  listening={false}
+                />
+              );
+            })()}
           </Layer>
         </Stage>
       </div>

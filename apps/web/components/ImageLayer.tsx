@@ -1,6 +1,6 @@
 'use client';
 
-import { Group, Image as KonvaImage, Rect } from 'react-konva';
+import { Group, Image as KonvaImage } from 'react-konva';
 import { ImageAssignment, Slot as SlotType } from '@/types';
 import { CANVAS_WIDTH, CANVAS_HEIGHT, PREVIEW_MAX_IMAGE_WIDTH, PREVIEW_MAX_IMAGE_HEIGHT } from '@/lib/config';
 import { useEffect, useState, memo, useMemo, useCallback } from 'react';
@@ -192,6 +192,106 @@ function ImageLayer({
     }
   }, [onSelect]);
 
+  /**
+   * Handle mouse wheel zoom - only when image is selected
+   */
+  const handleWheel = useCallback((e: any) => {
+    // Only allow zoom when image is selected
+    if (!isSelected) return;
+    
+    e.evt.preventDefault();
+    
+    if (!onScaleUpdate || !onTransformUpdate) return;
+
+    // Calculate minimum scale that fills the slot
+    const minScaleX = slotWidth / originalWidth;
+    const minScaleY = slotHeight / originalHeight;
+    const minScale = Math.max(minScaleX, minScaleY);
+    
+    // Set maximum scale (3x the minimum)
+    const maxScale = minScale * 3;
+    
+    // Calculate zoom step (10% per wheel tick)
+    const zoomStep = 0.1;
+    const delta = e.evt.deltaY > 0 ? -zoomStep : zoomStep;
+    
+    // Calculate new scale (maintaining aspect ratio)
+    const currentScale = assignment.scaleX;
+    let newScale = currentScale * (1 + delta);
+    
+    // Constrain scale between min and max
+    newScale = Math.max(minScale, Math.min(maxScale, newScale));
+    
+    if (newScale === currentScale) return;
+    
+    // If at minimum scale, center the image
+    if (newScale === minScale) {
+      const scaledWidth = originalWidth * newScale;
+      const scaledHeight = originalHeight * newScale;
+      const centeredX = (slotWidth - scaledWidth) / 2;
+      const centeredY = (slotHeight - scaledHeight) / 2;
+      
+      onScaleUpdate(newScale, newScale);
+      onTransformUpdate(centeredX, centeredY);
+    } else {
+      // Zoom towards cursor position
+      // Get pointer position relative to the stage
+      const stage = e.target.getStage();
+      const pointerPos = stage.getPointerPosition();
+      
+      if (pointerPos) {
+        // Convert pointer position to canvas coordinates
+        const pointerCanvasX = pointerPos.x / scaleX;
+        const pointerCanvasY = pointerPos.y / scaleY;
+        
+        // Calculate pointer position relative to slot
+        const pointerSlotX = pointerCanvasX - slotX;
+        const pointerSlotY = pointerCanvasY - slotY;
+        
+        // Calculate the point under the pointer in image coordinates (before scaling)
+        const imagePointX = (pointerSlotX - assignment.x) / currentScale;
+        const imagePointY = (pointerSlotY - assignment.y) / currentScale;
+        
+        // Calculate new position to keep the same point under the pointer
+        const newX = pointerSlotX - imagePointX * newScale;
+        const newY = pointerSlotY - imagePointY * newScale;
+        
+        // Constrain position to keep image within slot
+        const scaledWidth = originalWidth * newScale;
+        const scaledHeight = originalHeight * newScale;
+        
+        const minX = Math.min(0, slotWidth - scaledWidth);
+        const maxX = Math.max(0, slotWidth - scaledWidth);
+        const minY = Math.min(0, slotHeight - scaledHeight);
+        const maxY = Math.max(0, slotHeight - scaledHeight);
+        
+        const constrainedX = Math.max(minX, Math.min(maxX, newX));
+        const constrainedY = Math.max(minY, Math.min(maxY, newY));
+        
+        onScaleUpdate(newScale, newScale);
+        onTransformUpdate(constrainedX, constrainedY);
+      } else {
+        // Fallback: just update scale without adjusting position
+        onScaleUpdate(newScale, newScale);
+      }
+    }
+  }, [
+    isSelected,
+    assignment.scaleX,
+    assignment.x,
+    assignment.y,
+    originalWidth,
+    originalHeight,
+    slotWidth,
+    slotHeight,
+    slotX,
+    slotY,
+    scaleX,
+    scaleY,
+    onScaleUpdate,
+    onTransformUpdate
+  ]);
+
   if (!previewImage) {
     return null;
   }
@@ -214,47 +314,8 @@ function ImageLayer({
         onDragEnd={handleDragEnd}
         onClick={handleImageClick}
         onTap={handleImageClick}
+        onWheel={handleWheel}
       />
-      {/* Selection border */}
-      {isSelected && (
-        <Rect
-          x={previewX}
-          y={previewY}
-          width={previewWidth}
-          height={previewHeight}
-          stroke="#3b82f6"
-          strokeWidth={2}
-          fill="transparent"
-          listening={false}
-        />
-      )}
-      {/* Selection handles */}
-      {isSelected && (
-        <SelectionHandles
-          imageX={previewX}
-          imageY={previewY}
-          imageWidth={previewWidth}
-          imageHeight={previewHeight}
-          slotX={previewSlotX}
-          slotY={previewSlotY}
-          slotWidth={previewSlotWidth}
-          slotHeight={previewSlotHeight}
-          originalImageWidth={originalWidth}
-          originalImageHeight={originalHeight}
-          currentScaleX={assignment.scaleX}
-          currentScaleY={assignment.scaleY}
-          currentX={assignment.x}
-          currentY={assignment.y}
-          canvasScaleX={scaleX}
-          canvasScaleY={scaleY}
-          slotCanvasX={slotX}
-          slotCanvasY={slotY}
-          slotCanvasWidth={slotWidth}
-          slotCanvasHeight={slotHeight}
-          onScaleUpdate={onScaleUpdate}
-          onTransformUpdate={onTransformUpdate}
-        />
-      )}
     </Group>
   );
 }
