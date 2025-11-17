@@ -345,7 +345,7 @@ function SidebarContent({ width }: { width: number }) {
     );
   }
 
-  // Render ImageGrid with masonry layout
+  // Render ImageGrid with chronological grid layout
   return <ImageGrid containerWidth={width} />;
 }
 

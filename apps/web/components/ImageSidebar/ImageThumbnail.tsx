@@ -6,15 +6,16 @@ import { ImageData, useSidebar } from "@/contexts/SidebarContext";
 
 interface ImageThumbnailProps {
   image: ImageData;
-  width: number;
+  size: number;
 }
 
 /**
  * ImageThumbnail Component
- * Displays a draggable thumbnail for an image
+ * Displays a draggable thumbnail for an image in a square container
  * Shows placeholder icon if thumbnail fails to load
+ * Preserves aspect ratio using object-contain
  */
-export function ImageThumbnail({ image, width }: ImageThumbnailProps) {
+export function ImageThumbnail({ image, size }: ImageThumbnailProps) {
   const { openImageModal } = useSidebar();
   const [imageError, setImageError] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -47,28 +48,32 @@ export function ImageThumbnail({ image, width }: ImageThumbnailProps) {
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onDoubleClick={handleDoubleClick}
-      className={`relative rounded-lg overflow-hidden cursor-move border-2 border-transparent hover:border-blue-400 transition-all ${
+      className={`relative rounded-lg overflow-hidden cursor-move border-2 border-transparent hover:border-blue-400 transition-all bg-gray-50 ${
         isDragging ? "opacity-50" : "opacity-100"
       }`}
-      style={{ width: `${width}px` }}
+      style={{ 
+        width: `${size}px`, 
+        height: `${size}px`,
+      }}
     >
       {imageError ? (
         // Show placeholder icon if thumbnail fails to load
         <div
-          className="flex items-center justify-center bg-gray-100 rounded-lg"
-          style={{ width: `${width}px`, height: `${width}px` }}
+          className="flex items-center justify-center bg-gray-100 w-full h-full"
         >
           <ImageOff className="w-12 h-12 text-gray-400" />
         </div>
       ) : (
-        <img
-          src={image.thumbnailDataUrl}
-          alt={image.filename}
-          className="w-full h-auto block"
-          onError={handleImageError}
-          draggable={false} // Prevent default image drag behavior
-          style={{ userSelect: "none" }}
-        />
+        <div className="w-full h-full flex items-center justify-center">
+          <img
+            src={image.thumbnailDataUrl}
+            alt={image.filename}
+            className="max-w-full max-h-full object-contain rounded-md"
+            onError={handleImageError}
+            draggable={false} // Prevent default image drag behavior
+            style={{ userSelect: "none" }}
+          />
+        </div>
       )}
 
       {/* Filename tooltip on hover */}

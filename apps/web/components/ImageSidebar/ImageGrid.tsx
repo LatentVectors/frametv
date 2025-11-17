@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useCallback, useRef, useEffect, useState } from "react";
-import { useMasonry, usePositioner, useResizeObserver } from "masonic";
+import React, { useCallback, useRef, useEffect } from "react";
 import { useSidebar, ImageData } from "@/contexts/SidebarContext";
 import { ImageThumbnail } from "./ImageThumbnail";
 import { Loader2 } from "lucide-react";
@@ -12,7 +11,7 @@ interface ImageGridProps {
 
 /**
  * ImageGrid Component
- * Uses masonic for virtual scrolling and masonry layout
+ * Uses CSS grid for chronological layout
  * Implements infinite scroll to load more images
  */
 export function ImageGrid({ containerWidth }: ImageGridProps) {
@@ -33,33 +32,19 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
   } = useSidebar();
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const masonryContainerRef = useRef<HTMLDivElement>(null);
   const scrollActivityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
   const loadingRef = useRef(false);
   const isRestoringScroll = useRef(false);
-  const [viewportHeight, setViewportHeight] = useState(() =>
-    typeof window !== "undefined" ? window.innerHeight : 0
-  );
-  const [virtualScrollTop, setVirtualScrollTop] = useState(0);
-  const [isVirtualScrolling, setIsVirtualScrolling] = useState(false);
 
-  // Column width for masonry layout (dynamic from context)
-  const columnWidth = thumbnailSize;
-  // Gap between images (10px - 20% less than original 12px)
-  const columnGutter = 10;
+  // Gap between images
+  const gridGap = 12;
   
   // Calculate number of columns that can fit based on container width
   // Subtract padding (12px on each side = 24px total)
   const availableWidth = containerWidth - 24;
-  const gridWidth = Math.max(1, availableWidth);
-  const positioner = usePositioner({
-    width: gridWidth,
-    columnWidth,
-    columnGutter,
-  });
-  const resizeObserver = useResizeObserver(positioner);
+  const columnsCount = Math.max(1, Math.floor((availableWidth + gridGap) / (thumbnailSize + gridGap)));
 
   /**
    * Load next page of images from backend API
@@ -130,15 +115,6 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
     const scrollHeight = container.scrollHeight;
     const clientHeight = container.clientHeight;
 
-    setVirtualScrollTop(scrollTopValue);
-    setIsVirtualScrolling(true);
-    if (scrollActivityTimeoutRef.current) {
-      clearTimeout(scrollActivityTimeoutRef.current);
-    }
-    scrollActivityTimeoutRef.current = setTimeout(() => {
-      setIsVirtualScrolling(false);
-    }, 120);
-
     // Store scroll position in context (only if not currently restoring)
     if (!isRestoringScroll.current) {
       setScrollPosition(scrollTopValue);
@@ -162,46 +138,12 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
     if (!container) return;
 
     container.addEventListener("scroll", handleScroll);
-    // Initialize scroll state for masonry virtualization
+    // Initialize scroll state
     handleScroll();
     return () => {
       container.removeEventListener("scroll", handleScroll);
     };
   }, [handleScroll]);
-
-  /**
-   * Track the viewport height of the scroll container for virtualization
-   */
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    const updateHeight = () => {
-      setViewportHeight(container.clientHeight);
-    };
-
-    updateHeight();
-
-    if (typeof ResizeObserver !== "undefined") {
-      const observer = new ResizeObserver(() => updateHeight());
-      observer.observe(container);
-      return () => observer.disconnect();
-    } else {
-      window.addEventListener("resize", updateHeight);
-      return () => window.removeEventListener("resize", updateHeight);
-    }
-  }, []);
-
-  /**
-   * Clean up scroll activity timeout on unmount
-   */
-  useEffect(() => {
-    return () => {
-      if (scrollActivityTimeoutRef.current) {
-        clearTimeout(scrollActivityTimeoutRef.current);
-      }
-    };
-  }, []);
 
   /**
    * Restore scroll position when images are loaded
@@ -216,41 +158,28 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
       if (scrollPosition > 0) {
         isRestoringScroll.current = true;
         container.scrollTop = scrollPosition;
-        setVirtualScrollTop(scrollPosition);
         // Reset flag after a short delay to allow normal scroll tracking
         setTimeout(() => {
           isRestoringScroll.current = false;
         }, 100);
-      } else {
-        setVirtualScrollTop(container.scrollTop);
       }
     });
   }, [images.length, scrollPosition]);
 
-  /**
-   * Render function for each masonry item
-   */
-  const renderItem = useCallback(({ data }: { data: ImageData }) => {
-    return <ImageThumbnail image={data} width={columnWidth} />;
-  }, [columnWidth]);
-
-  const masonry = useMasonry({
-    containerRef: masonryContainerRef,
-    className: "w-full",
-    items: images,
-    positioner,
-    resizeObserver,
-    scrollTop: virtualScrollTop,
-    height: Math.max(1, viewportHeight),
-    isScrolling: isVirtualScrolling,
-    overscanBy: 2,
-    render: renderItem,
-  });
-
   return (
     <div ref={scrollContainerRef} className="h-full overflow-y-auto scrollbar-hover">
-      <div className="p-3 space-y-4">
-        {masonry}
+      <div className="p-3">
+        {/* CSS Grid layout for chronological order */}
+        <div 
+          className="grid gap-3"
+          style={{
+            gridTemplateColumns: `repeat(${columnsCount}, ${thumbnailSize}px)`,
+          }}
+        >
+          {images.map((image) => (
+            <ImageThumbnail key={image.path} image={image} size={thumbnailSize} />
+          ))}
+        </div>
 
         {/* Loading indicator at bottom */}
         {isLoading && (

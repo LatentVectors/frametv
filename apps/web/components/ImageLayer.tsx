@@ -5,7 +5,6 @@ import { ImageAssignment, Slot as SlotType } from '@/types';
 import { CANVAS_WIDTH, CANVAS_HEIGHT, PREVIEW_MAX_IMAGE_WIDTH, PREVIEW_MAX_IMAGE_HEIGHT } from '@/lib/config';
 import { useEffect, useState, memo, useMemo, useCallback } from 'react';
 import { createPreviewImage } from '@/lib/imageUtils';
-import SelectionHandles from './SelectionHandles';
 
 interface ImageLayerProps {
   assignment: ImageAssignment;
