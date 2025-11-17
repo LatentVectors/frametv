@@ -30,7 +30,7 @@ interface UseResizableSidebarReturn {
  */
 export function useResizableSidebar({
   minWidth = 200,
-  maxWidth = 600,
+  maxWidth = 800,
   defaultWidth = 300,
   onWidthChange,
 }: UseResizableSidebarConfig = {}): UseResizableSidebarReturn {

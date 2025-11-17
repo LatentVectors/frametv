@@ -23,6 +23,7 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
     isLoading,
     currentPage,
     scrollPosition,
+    thumbnailSize,
     setCurrentPage,
     addImages,
     setHasMore,
@@ -43,8 +44,8 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
   const [virtualScrollTop, setVirtualScrollTop] = useState(0);
   const [isVirtualScrolling, setIsVirtualScrolling] = useState(false);
 
-  // Column width for masonry layout (150px as per spec)
-  const columnWidth = 150;
+  // Column width for masonry layout (dynamic from context)
+  const columnWidth = thumbnailSize;
   // Gap between images (12px as per spec)
   const columnGutter = 12;
   
@@ -228,7 +229,7 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
    */
   const renderItem = useCallback(({ data }: { data: ImageData }) => {
     return <ImageThumbnail image={data} width={columnWidth} />;
-  }, []);
+  }, [columnWidth]);
 
   const masonry = useMasonry({
     containerRef: masonryContainerRef,

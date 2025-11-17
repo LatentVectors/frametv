@@ -32,6 +32,9 @@ interface SidebarContextType {
   // Sidebar dimensions
   sidebarWidth: number;
 
+  // Thumbnail size
+  thumbnailSize: number;
+
   // Pagination state
   currentPage: number;
   hasMore: boolean;
@@ -45,6 +48,7 @@ interface SidebarContextType {
   setImages: (images: ImageData[]) => void;
   addImages: (newImages: ImageData[]) => void;
   setSidebarWidth: (width: number) => void;
+  setThumbnailSize: (size: number) => void;
   clearDirectory: () => void;
   setCurrentPage: (page: number) => void;
   setHasMore: (hasMore: boolean) => void;
@@ -59,6 +63,7 @@ const defaultContextValue: SidebarContextType = {
   directoryPath: null,
   images: [],
   sidebarWidth: 300,
+  thumbnailSize: 150,
   currentPage: 1,
   hasMore: false,
   isLoading: false,
@@ -67,6 +72,7 @@ const defaultContextValue: SidebarContextType = {
   setImages: () => {},
   addImages: () => {},
   setSidebarWidth: () => {},
+  setThumbnailSize: () => {},
   clearDirectory: () => {},
   setCurrentPage: () => {},
   setHasMore: () => {},
@@ -95,6 +101,7 @@ export function useSidebar() {
  */
 const STORAGE_KEYS = {
   SIDEBAR_WIDTH: "sidebar_width",
+  THUMBNAIL_SIZE: "thumbnail_size",
 };
 
 /**
@@ -113,6 +120,7 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
   const [directoryPath, setDirectoryPathState] = useState<string | null>(null);
   const [images, setImagesState] = useState<ImageData[]>([]);
   const [sidebarWidth, setSidebarWidthState] = useState<number>(300);
+  const [thumbnailSize, setThumbnailSizeState] = useState<number>(150);
   const [currentPage, setCurrentPageState] = useState<number>(1);
   const [hasMore, setHasMoreState] = useState<boolean>(false);
   const [isLoading, setIsLoadingState] = useState<boolean>(false);
@@ -125,8 +133,17 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
       const savedWidth = localStorage.getItem(STORAGE_KEYS.SIDEBAR_WIDTH);
       if (savedWidth) {
         const width = parseInt(savedWidth, 10);
-        if (!isNaN(width) && width >= 200 && width <= 600) {
+        if (!isNaN(width) && width >= 200 && width <= 800) {
           setSidebarWidthState(width);
+        }
+      }
+
+      // Restore thumbnail size
+      const savedThumbnailSize = localStorage.getItem(STORAGE_KEYS.THUMBNAIL_SIZE);
+      if (savedThumbnailSize) {
+        const size = parseInt(savedThumbnailSize, 10);
+        if (!isNaN(size) && size >= 80 && size <= 300) {
+          setThumbnailSizeState(size);
         }
       }
     } catch (error) {
@@ -142,6 +159,15 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
       console.error("Error persisting sidebar width:", error);
     }
   }, [sidebarWidth]);
+
+  // Persist thumbnail size to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.THUMBNAIL_SIZE, thumbnailSize.toString());
+    } catch (error) {
+      console.error("Error persisting thumbnail size:", error);
+    }
+  }, [thumbnailSize]);
 
   /**
    * Set the selected album name
@@ -168,9 +194,18 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
    * Update sidebar width
    */
   const setSidebarWidth = (width: number) => {
-    // Enforce constraints
-    const constrainedWidth = Math.max(200, Math.min(600, width));
+    // Enforce constraints (max 800 to allow 2 columns at 300px thumbnails)
+    const constrainedWidth = Math.max(200, Math.min(800, width));
     setSidebarWidthState(constrainedWidth);
+  };
+
+  /**
+   * Update thumbnail size
+   */
+  const setThumbnailSize = (size: number) => {
+    // Enforce constraints (80-300px)
+    const constrainedSize = Math.max(80, Math.min(300, size));
+    setThumbnailSizeState(constrainedSize);
   };
 
   /**
@@ -217,6 +252,7 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
     directoryPath,
     images,
     sidebarWidth,
+    thumbnailSize,
     currentPage,
     hasMore,
     isLoading,
@@ -225,6 +261,7 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
     setImages,
     addImages,
     setSidebarWidth,
+    setThumbnailSize,
     clearDirectory,
     setCurrentPage,
     setHasMore,

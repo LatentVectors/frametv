@@ -44,7 +44,7 @@ function HomeContent() {
   const { width, isResizing, handleMouseDown } = useResizableSidebar({
     defaultWidth: sidebarWidth,
     minWidth: 200,
-    maxWidth: 600,
+    maxWidth: 800,
     onWidthChange: setSidebarWidth,
   });
 
