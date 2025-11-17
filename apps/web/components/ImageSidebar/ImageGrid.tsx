@@ -24,6 +24,7 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
     currentPage,
     scrollPosition,
     thumbnailSize,
+    sortOrder,
     setCurrentPage,
     addImages,
     setHasMore,
@@ -46,8 +47,8 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
 
   // Column width for masonry layout (dynamic from context)
   const columnWidth = thumbnailSize;
-  // Gap between images (12px as per spec)
-  const columnGutter = 12;
+  // Gap between images (10px - 20% less than original 12px)
+  const columnGutter = 10;
   
   // Calculate number of columns that can fit based on container width
   // Subtract padding (12px on each side = 24px total)
@@ -81,6 +82,7 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
           albumName: directoryPath, // directoryPath now contains album name
           page: currentPage + 1,
           limit: 100, // Load 100 images per page
+          sortOrder,
         }),
       });
 
@@ -108,6 +110,7 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
     directoryPath,
     hasMore,
     currentPage,
+    sortOrder,
     addImages,
     setCurrentPage,
     setHasMore,
@@ -245,7 +248,7 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
   });
 
   return (
-    <div ref={scrollContainerRef} className="h-full overflow-y-auto">
+    <div ref={scrollContainerRef} className="h-full overflow-y-auto scrollbar-hover">
       <div className="p-3 space-y-4">
         {masonry}
 

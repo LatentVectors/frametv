@@ -40,8 +40,8 @@ export const PREVIEW_MAX_WIDTH_PERCENT = 90;
  * Maximum preview image resolution (for performance optimization)
  * Images larger than this will be downscaled for preview
  */
-export const PREVIEW_MAX_IMAGE_WIDTH = 1920;
-export const PREVIEW_MAX_IMAGE_HEIGHT = 1080;
+export const PREVIEW_MAX_IMAGE_WIDTH = 3840;
+export const PREVIEW_MAX_IMAGE_HEIGHT = 2160;
 
 /**
  * Calculate horizontal margin percentage based on max(percent width, percent height)

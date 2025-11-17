@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
+import { Navigation } from "@/components/Navigation";
 
 interface TVSettings {
   ipAddress?: string;
@@ -92,17 +92,7 @@ export default function SettingsPage() {
   return (
     <div className="min-h-screen bg-white">
       {/* Top bar with navigation */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-        <h1 className="text-xl font-semibold">Settings</h1>
-        <div className="flex items-center gap-4">
-          <Link href="/gallery">
-            <Button variant="outline">Gallery</Button>
-          </Link>
-          <Link href="/">
-            <Button variant="outline">Editor</Button>
-          </Link>
-        </div>
-      </div>
+      <Navigation />
 
       {/* Settings content */}
       <div className="max-w-2xl mx-auto px-6 py-8">

@@ -4,10 +4,22 @@ import path from "path";
 import sharp from "sharp";
 import { ensureDataDirectories, getAlbumsDirectory } from "@/lib/dataUtils";
 
-// File extensions to filter for
-const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png"];
+// Supported image file extensions (case-insensitive)
+// Includes common variations (e.g., .jpg/.jpeg, .tif/.tiff)
+const IMAGE_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".webp",
+  ".bmp",
+  ".tiff",
+  ".tif",
+  ".heic",
+  ".heif",
+];
 
-// Check if file has valid image extension
+// Check if file has valid image extension (case-insensitive)
 function isImageFile(filename: string): boolean {
   const ext = path.extname(filename).toLowerCase();
   return IMAGE_EXTENSIONS.includes(ext);
@@ -44,13 +56,57 @@ async function getFileInfo(filePath: string) {
   };
 }
 
+// Get image date from EXIF metadata with fallback to file modification date
+async function getImageDate(filePath: string): Promise<Date> {
+  try {
+    const metadata = await sharp(filePath).metadata();
+    
+    // Try to get EXIF date (DateTimeOriginal is the actual capture date)
+    if (metadata.exif) {
+      // Sharp provides EXIF data as a Buffer, we need to parse it
+      // The exif property contains the raw EXIF buffer
+      const exifBuffer = metadata.exif;
+      
+      // Look for DateTimeOriginal in the EXIF data
+      // EXIF dates are typically in format: "YYYY:MM:DD HH:MM:SS"
+      const exifString = exifBuffer.toString('latin1');
+      
+      // Search for DateTimeOriginal tag (more reliable than CreateDate)
+      // Pattern: YYYY:MM:DD HH:MM:SS
+      const datePattern = /(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/;
+      const match = exifString.match(datePattern);
+      
+      if (match) {
+        // Convert EXIF date format to ISO format
+        const [, year, month, day, hour, minute, second] = match;
+        const dateStr = `${year}-${month}-${day}T${hour}:${minute}:${second}`;
+        const exifDate = new Date(dateStr);
+        
+        // Validate the date is reasonable (not in the future, not before 1990)
+        const now = new Date();
+        const minDate = new Date('1990-01-01');
+        if (exifDate <= now && exifDate >= minDate) {
+          return exifDate;
+        }
+      }
+    }
+  } catch (error) {
+    // Silently fall through to use file modification date
+    // This is expected for non-image files or corrupted images
+  }
+  
+  // Fallback to file modification date
+  const stats = await fs.stat(filePath);
+  return stats.mtime;
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Ensure albums directory exists
     ensureDataDirectories();
 
     const body = await request.json();
-    const { albumName, page = 1, limit = 50 } = body;
+    const { albumName, page = 1, limit = 50, sortOrder = "desc" } = body;
 
     // Validate inputs
     if (!albumName || typeof albumName !== "string") {
@@ -63,6 +119,13 @@ export async function POST(request: NextRequest) {
     if (page < 1 || limit < 1 || limit > 100) {
       return NextResponse.json(
         { success: false, error: "Invalid pagination parameters" },
+        { status: 400 }
+      );
+    }
+
+    if (sortOrder !== "desc" && sortOrder !== "asc") {
+      return NextResponse.json(
+        { success: false, error: "Invalid sort order. Must be 'desc' or 'asc'" },
         { status: 400 }
       );
     }
@@ -103,14 +166,30 @@ export async function POST(request: NextRequest) {
       .filter((entry) => entry.isFile() && isImageFile(entry.name))
       .map((entry) => entry.name);
 
-    // Sort alphabetically (case-insensitive)
-    imageFiles.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    // Get dates for all images and sort by date
+    const imageFilesWithDates = await Promise.all(
+      imageFiles.map(async (filename) => {
+        const filePath = path.join(albumPath, filename);
+        const date = await getImageDate(filePath);
+        return { filename, date };
+      })
+    );
+
+    // Sort by date (desc = newest first, asc = oldest first)
+    if (sortOrder === "desc") {
+      imageFilesWithDates.sort((a, b) => b.date.getTime() - a.date.getTime());
+    } else {
+      imageFilesWithDates.sort((a, b) => a.date.getTime() - b.date.getTime());
+    }
+
+    // Extract sorted filenames
+    const sortedFiles = imageFilesWithDates.map((item) => item.filename);
 
     // Calculate pagination
-    const total = imageFiles.length;
+    const total = sortedFiles.length;
     const startIndex = (page - 1) * limit;
     const endIndex = startIndex + limit;
-    const paginatedFiles = imageFiles.slice(startIndex, endIndex);
+    const paginatedFiles = sortedFiles.slice(startIndex, endIndex);
     const hasMore = endIndex < total;
 
     // Generate image data with thumbnails

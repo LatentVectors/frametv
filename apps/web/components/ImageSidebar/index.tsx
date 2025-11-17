@@ -1,14 +1,19 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useSidebar } from "@/contexts/SidebarContext";
+import {
+  useSidebar,
+  STORAGE_KEYS,
+  loadFromLocalStorage,
+} from "@/contexts/SidebarContext";
 import { SidebarErrorBoundary } from "./ErrorBoundary";
 import { AlbumSelector } from "./AlbumSelector";
 import { ResizeHandle } from "./ResizeHandle";
 import { ImageGrid } from "./ImageGrid";
+import { ImageModal } from "@/components/ImageModal";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { ChevronUp, SlidersHorizontal } from "lucide-react";
+import { ChevronUp, SlidersHorizontal, ArrowDownWideNarrow, ArrowUpWideNarrow } from "lucide-react";
 
 interface ImageSidebarProps {
   width: number;
@@ -17,28 +22,33 @@ interface ImageSidebarProps {
 }
 
 function SidebarHeader() {
-  const { directoryPath, clearDirectory, thumbnailSize, setThumbnailSize } = useSidebar();
+  const { 
+    directoryPath, 
+    clearDirectory, 
+    thumbnailSize, 
+    setThumbnailSize, 
+    sortOrder, 
+    setSortOrder,
+    setImages,
+    setHasMore,
+    setCurrentPage,
+    setIsLoading,
+    setScrollPosition,
+  } = useSidebar();
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipTimeout, setTooltipTimeoutState] =
     useState<NodeJS.Timeout | null>(null);
-  const [isCollapsed, setIsCollapsed] = useState(false);
-
-  // Load collapsed state from localStorage
-  useEffect(() => {
-    try {
-      const savedCollapsed = localStorage.getItem("sidebar_header_collapsed");
-      if (savedCollapsed !== null) {
-        setIsCollapsed(savedCollapsed === "true");
-      }
-    } catch (error) {
-      console.error("Error loading sidebar header collapsed state:", error);
-    }
-  }, []);
+  const [isCollapsed, setIsCollapsed] = useState(() =>
+    loadFromLocalStorage(STORAGE_KEYS.HEADER_COLLAPSED, false)
+  );
 
   // Persist collapsed state to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem("sidebar_header_collapsed", isCollapsed.toString());
+      localStorage.setItem(
+        STORAGE_KEYS.HEADER_COLLAPSED,
+        JSON.stringify(isCollapsed)
+      );
     } catch (error) {
       console.error("Error persisting sidebar header collapsed state:", error);
     }
@@ -75,6 +85,47 @@ function SidebarHeader() {
 
   const handleThumbnailSizeChange = (value: number[]) => {
     setThumbnailSize(value[0]);
+  };
+
+  const toggleSortOrder = async () => {
+    const newSortOrder = sortOrder === "desc" ? "asc" : "desc";
+    setSortOrder(newSortOrder);
+    
+    // Reload images with new sort order
+    if (directoryPath) {
+      setIsLoading(true);
+      try {
+        const response = await fetch("/api/albums/browse", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            albumName: directoryPath,
+            page: 1,
+            limit: 100,
+            sortOrder: newSortOrder,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to reload images");
+        }
+
+        const data = await response.json();
+
+        if (data.success && data.images) {
+          setImages(data.images);
+          setHasMore(data.hasMore);
+          setCurrentPage(data.page);
+          setScrollPosition(0); // Reset scroll to top
+        }
+      } catch (error) {
+        console.error("Error reloading images with new sort order:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
   };
 
   const toggleCollapse = () => {
@@ -128,7 +179,7 @@ function SidebarHeader() {
               Change Album
             </Button>
           </div>
-          
+
           {/* Thumbnail Size Slider */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -145,6 +196,32 @@ function SidebarHeader() {
               step={10}
               className="w-full"
             />
+          </div>
+
+          {/* Sort Order Toggle */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-gray-700">
+                Sort Order
+              </label>
+              <div className="relative group">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={toggleSortOrder}
+                  className="h-7 px-2 flex items-center gap-1.5"
+                >
+                  {sortOrder === "desc" ? (
+                    <ArrowDownWideNarrow className="h-4 w-4" />
+                  ) : (
+                    <ArrowUpWideNarrow className="h-4 w-4" />
+                  )}
+                  <span className="text-xs">
+                    {sortOrder === "desc" ? "Newest First" : "Oldest First"}
+                  </span>
+                </Button>
+              </div>
+            </div>
           </div>
 
           {/* Collapse button */}
@@ -166,7 +243,82 @@ function SidebarHeader() {
 }
 
 function SidebarContent({ width }: { width: number }) {
-  const { directoryPath, images, isLoading } = useSidebar();
+  const {
+    directoryPath,
+    images,
+    isLoading,
+    sortOrder,
+    setImages,
+    setHasMore,
+    setCurrentPage,
+    setIsLoading,
+  } = useSidebar();
+  const [hasAttemptedLoad, setHasAttemptedLoad] = useState(false);
+
+  // Auto-fetch images if we have a restored album but no images
+  useEffect(() => {
+    const fetchAlbumImages = async () => {
+      if (
+        !directoryPath ||
+        hasAttemptedLoad ||
+        isLoading ||
+        images.length > 0
+      ) {
+        return;
+      }
+
+      setHasAttemptedLoad(true);
+      setIsLoading(true);
+
+      try {
+        const response = await fetch("/api/albums/browse", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            albumName: directoryPath,
+            page: 1,
+            limit: 100,
+            sortOrder,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to load album images");
+        }
+
+        const data = await response.json();
+
+        if (data.success && data.images) {
+          setImages(data.images);
+          setHasMore(data.hasMore);
+          setCurrentPage(data.page);
+        }
+      } catch (error) {
+        console.error("Error auto-loading album images:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchAlbumImages();
+  }, [
+    directoryPath,
+    images.length,
+    isLoading,
+    hasAttemptedLoad,
+    sortOrder,
+    setImages,
+    setHasMore,
+    setCurrentPage,
+    setIsLoading,
+  ]);
+
+  // Reset load attempt when directory changes
+  useEffect(() => {
+    setHasAttemptedLoad(false);
+  }, [directoryPath]);
 
   // Show album selector if no album is selected
   if (!directoryPath) {
@@ -202,6 +354,8 @@ export function ImageSidebar({
   isResizing,
   onResizeStart,
 }: ImageSidebarProps) {
+  const { selectedImageForModal, closeImageModal } = useSidebar();
+
   return (
     <SidebarErrorBoundary>
       <div
@@ -214,6 +368,11 @@ export function ImageSidebar({
         </div>
         <ResizeHandle onMouseDown={onResizeStart} isResizing={isResizing} />
       </div>
+
+      {/* Image Modal - rendered outside sidebar for full-screen overlay */}
+      {selectedImageForModal && (
+        <ImageModal image={selectedImageForModal} onClose={closeImageModal} />
+      )}
     </SidebarErrorBoundary>
   );
 }

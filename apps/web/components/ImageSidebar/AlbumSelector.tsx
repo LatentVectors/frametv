@@ -24,7 +24,7 @@ interface AlbumsResponse {
 }
 
 export function AlbumSelector() {
-  const { setDirectory, setImages, setHasMore, setCurrentPage, setIsLoading } =
+  const { directoryPath, setDirectory, setImages, setHasMore, setCurrentPage, setIsLoading, setScrollPosition, sortOrder } =
     useSidebar();
   const [albums, setAlbums] = useState<Album[]>([]);
   const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null);
@@ -83,7 +83,13 @@ export function AlbumSelector() {
   const handleAlbumSelect = async (albumName: string) => {
     try {
       setError(null);
-      setSelectedAlbum(albumName);
+      
+      // If selecting a different album, reset scroll position
+      if (albumName !== directoryPath) {
+        setSelectedAlbum(albumName);
+        setScrollPosition(0);
+      }
+      
       setIsLoading(true);
 
       // Set directory in context
@@ -99,6 +105,7 @@ export function AlbumSelector() {
           albumName,
           page: 1,
           limit: 100,
+          sortOrder,
         }),
       });
 

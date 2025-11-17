@@ -16,7 +16,6 @@ import {
   CANVAS_HEIGHT,
   PREVIEW_MIN_WIDTH,
   PREVIEW_MIN_HEIGHT,
-  PREVIEW_MAX_WIDTH_PERCENT,
   CANVAS_BACKGROUND_COLOR,
 } from "@/lib/config";
 import { Template, ImageAssignment } from "@/types";
@@ -63,50 +62,36 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
         const containerWidth = container.clientWidth;
         const containerHeight = container.clientHeight;
 
-        // Calculate topbar height and padding (from spec: topbar is ~72px, padding is 48px total)
-        const topBarHeight = 72; // Approximate topbar height
-        const verticalPadding = 48; // Total vertical padding (24px top + 24px bottom)
+        // Calculate canvas size based on available container space
+        // Maintain 16:9 aspect ratio and fit within container
+        const aspectRatio = CANVAS_WIDTH / CANVAS_HEIGHT;
+        
+        let width = containerWidth;
+        let height = width / aspectRatio;
 
-        // Calculate max canvas height to never exceed viewport
-        const maxCanvasHeight =
-          window.innerHeight - topBarHeight - verticalPadding;
-
-        // Calculate max width based on viewport (90% max)
-        const maxWidth = (window.innerWidth * PREVIEW_MAX_WIDTH_PERCENT) / 100;
-
-        // Calculate width maintaining 16:9 aspect ratio
-        let width = Math.min(containerWidth, maxWidth);
-        let height = width * (CANVAS_HEIGHT / CANVAS_WIDTH);
-
-        // Critical: Ensure height never exceeds maxCanvasHeight
-        if (height > maxCanvasHeight) {
-          height = maxCanvasHeight;
-          width = height * (CANVAS_WIDTH / CANVAS_HEIGHT);
-        }
-
-        // Ensure minimum dimensions
-        if (width < PREVIEW_MIN_WIDTH) {
-          width = PREVIEW_MIN_WIDTH;
-          height = PREVIEW_MIN_HEIGHT;
-        } else if (height < PREVIEW_MIN_HEIGHT) {
-          height = PREVIEW_MIN_HEIGHT;
-          width = height * (CANVAS_WIDTH / CANVAS_HEIGHT);
-        }
-
-        // Final check: ensure height doesn't exceed maxCanvasHeight
-        if (height > maxCanvasHeight) {
-          height = maxCanvasHeight;
-          width = height * (CANVAS_WIDTH / CANVAS_HEIGHT);
+        // If height exceeds container, constrain by height instead
+        if (height > containerHeight) {
+          height = containerHeight;
+          width = height * aspectRatio;
         }
 
         setCanvasSize({ width, height });
       };
 
+      // Use ResizeObserver to detect container size changes
+      const resizeObserver = new ResizeObserver(() => {
+        updateCanvasSize();
+      });
+
+      if (containerRef.current) {
+        resizeObserver.observe(containerRef.current);
+      }
+
+      // Initial size calculation
       updateCanvasSize();
-      window.addEventListener("resize", updateCanvasSize);
 
       return () => {
-        window.removeEventListener("resize", updateCanvasSize);
+        resizeObserver.disconnect();
       };
     }, []);
 

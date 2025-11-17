@@ -6,9 +6,6 @@ import Link from "next/link";
 import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
-  PREVIEW_MIN_WIDTH,
-  PREVIEW_MIN_HEIGHT,
-  PREVIEW_MAX_WIDTH_PERCENT,
 } from "@/lib/config";
 import { Template, ImageAssignment } from "@/types";
 import { getDefaultTemplate } from "@/lib/templates";
@@ -16,8 +13,8 @@ import TemplateSelector from "@/components/TemplateSelector";
 import SaveButton from "@/components/SaveButton";
 import type { CanvasEditorHandle } from "@/components/CanvasEditor";
 import { useToast } from "@/hooks/use-toast";
-import { Button } from "@/components/ui/button";
 import { SidebarProvider, useSidebar } from "@/contexts/SidebarContext";
+import { Navigation } from "@/components/Navigation";
 import { ImageSidebar } from "@/components/ImageSidebar";
 import { useResizableSidebar } from "@/hooks/useResizableSidebar";
 
@@ -32,6 +29,7 @@ function HomeContent() {
     getDefaultTemplate()
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
   const [imageAssignments, setImageAssignments] = useState<
     Map<string, ImageAssignment>
   >(new Map());
@@ -52,11 +50,21 @@ function HomeContent() {
     setSelectedTemplate(template);
     // Clear image assignments when template changes
     setImageAssignments(new Map());
+    // Reset dirty flag since canvas is now empty
+    setIsDirty(false);
   };
 
   const handleExportReady = useCallback((handle: CanvasEditorHandle) => {
     canvasEditorHandleRef.current = handle;
   }, []);
+
+  // Track changes to imageAssignments to mark canvas as dirty
+  useEffect(() => {
+    // Mark as dirty if there are any image assignments
+    if (imageAssignments.size > 0) {
+      setIsDirty(true);
+    }
+  }, [imageAssignments]);
 
   const handleSave = async () => {
     if (!canvasEditorHandleRef.current || isSaving) return;
@@ -84,6 +92,8 @@ function HomeContent() {
           title: "Image saved successfully",
           description: `Saved as ${result.filename}`,
         });
+        // Clear dirty flag after successful save
+        setIsDirty(false);
       } else {
         throw new Error(result.error || "Failed to save image");
       }
@@ -109,31 +119,17 @@ function HomeContent() {
   return (
     <main className="flex h-screen flex-col bg-white">
       {/* Top bar - full width */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-        <div className="flex items-center gap-2">
-          <Link href="/gallery">
-            <Button variant="ghost" className="text-sm">
-              Gallery
-            </Button>
-          </Link>
-          <Link href="/settings">
-            <Button variant="ghost" className="text-sm">
-              Settings
-            </Button>
-          </Link>
-        </div>
-        <div className="flex items-center gap-2">
-          <TemplateSelector
-            selectedTemplate={selectedTemplate}
-            onTemplateChange={handleTemplateChange}
-          />
-          <SaveButton
-            onSave={handleSave}
-            disabled={isSaving || !allSlotsFilled}
-            isSaving={isSaving}
-          />
-        </div>
-      </div>
+      <Navigation>
+        <TemplateSelector
+          selectedTemplate={selectedTemplate}
+          onTemplateChange={handleTemplateChange}
+        />
+        <SaveButton
+          onSave={handleSave}
+          disabled={isSaving || !allSlotsFilled || !isDirty}
+          isSaving={isSaving}
+        />
+      </Navigation>
 
       {/* Main content area - flexbox horizontal layout */}
       <div className="flex-1 flex flex-row overflow-hidden">
@@ -151,11 +147,9 @@ function HomeContent() {
             className="relative bg-white border border-gray-200 shadow-sm"
             style={{
               width: "100%",
-              maxWidth: `min(${PREVIEW_MAX_WIDTH_PERCENT}vw, calc(100vw - ${width}px - 100px))`,
+              maxWidth: "100%",
+              maxHeight: "100%",
               aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`,
-              minWidth: `${PREVIEW_MIN_WIDTH}px`,
-              minHeight: `${PREVIEW_MIN_HEIGHT}px`,
-              maxHeight: "calc(100vh - 120px)", // Ensure canvas doesn't exceed viewport
             }}
           >
             {/* Canvas container div for react-konva Stage */}

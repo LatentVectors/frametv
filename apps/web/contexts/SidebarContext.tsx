@@ -20,6 +20,11 @@ export interface ImageData {
 }
 
 /**
+ * Sort order for images
+ */
+export type SortOrder = "desc" | "asc";
+
+/**
  * Shape of the Sidebar Context
  */
 interface SidebarContextType {
@@ -35,6 +40,9 @@ interface SidebarContextType {
   // Thumbnail size
   thumbnailSize: number;
 
+  // Sort order
+  sortOrder: SortOrder;
+
   // Pagination state
   currentPage: number;
   hasMore: boolean;
@@ -43,17 +51,23 @@ interface SidebarContextType {
   // Scroll position state
   scrollPosition: number;
 
+  // Modal state
+  selectedImageForModal: ImageData | null;
+
   // Helper functions
   setDirectory: (albumName: string) => void;
   setImages: (images: ImageData[]) => void;
   addImages: (newImages: ImageData[]) => void;
   setSidebarWidth: (width: number) => void;
   setThumbnailSize: (size: number) => void;
+  setSortOrder: (order: SortOrder) => void;
   clearDirectory: () => void;
   setCurrentPage: (page: number) => void;
   setHasMore: (hasMore: boolean) => void;
   setIsLoading: (isLoading: boolean) => void;
   setScrollPosition: (position: number) => void;
+  openImageModal: (image: ImageData) => void;
+  closeImageModal: () => void;
 }
 
 /**
@@ -62,22 +76,27 @@ interface SidebarContextType {
 const defaultContextValue: SidebarContextType = {
   directoryPath: null,
   images: [],
-  sidebarWidth: 300,
+  sidebarWidth: 300, // Fallback value (actual value calculated in provider)
   thumbnailSize: 150,
+  sortOrder: "desc",
   currentPage: 1,
   hasMore: false,
   isLoading: false,
   scrollPosition: 0,
+  selectedImageForModal: null,
   setDirectory: () => {},
   setImages: () => {},
   addImages: () => {},
   setSidebarWidth: () => {},
   setThumbnailSize: () => {},
+  setSortOrder: () => {},
   clearDirectory: () => {},
   setCurrentPage: () => {},
   setHasMore: () => {},
   setIsLoading: () => {},
   setScrollPosition: () => {},
+  openImageModal: () => {},
+  closeImageModal: () => {},
 };
 
 /**
@@ -102,7 +121,14 @@ export function useSidebar() {
 const STORAGE_KEYS = {
   SIDEBAR_WIDTH: "sidebar_width",
   THUMBNAIL_SIZE: "thumbnail_size",
+  SELECTED_ALBUM: "selected_album",
+  SCROLL_POSITION: "scroll_position",
+  HEADER_COLLAPSED: "sidebar_header_collapsed",
+  SORT_ORDER: "sort_order",
 };
+
+// Export storage keys for use in other components
+export { STORAGE_KEYS };
 
 /**
  * SidebarProvider Props
@@ -112,49 +138,95 @@ interface SidebarProviderProps {
 }
 
 /**
+ * Calculate initial sidebar width based on viewport
+ * Returns one-third of viewport width, capped at max 800px
+ */
+function calculateInitialSidebarWidth(): number {
+  if (typeof window === "undefined") return 300;
+  const viewportWidth = window.innerWidth;
+  const oneThirdWidth = Math.floor(viewportWidth / 3);
+  return Math.max(200, Math.min(oneThirdWidth, 800));
+}
+
+/**
+ * Load a value from localStorage with fallback
+ */
+export function loadFromLocalStorage<T>(
+  key: string,
+  fallback: T,
+  validator?: (value: any) => boolean
+): T {
+  if (typeof window === "undefined") return fallback;
+
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved === null) return fallback;
+
+    const parsed = JSON.parse(saved);
+
+    // If validator is provided, use it to validate the value
+    if (validator && !validator(parsed)) {
+      return fallback;
+    }
+
+    return parsed as T;
+  } catch (error) {
+    console.error(`Error loading ${key} from localStorage:`, error);
+    return fallback;
+  }
+}
+
+/**
  * Sidebar Provider Component
  * Manages all sidebar state and provides it to child components
  */
 export function SidebarProvider({ children }: SidebarProviderProps) {
-  // State management
-  const [directoryPath, setDirectoryPathState] = useState<string | null>(null);
+  // State management with lazy initialization from localStorage
+  const [directoryPath, setDirectoryPathState] = useState<string | null>(() =>
+    loadFromLocalStorage<string | null>(STORAGE_KEYS.SELECTED_ALBUM, null)
+  );
   const [images, setImagesState] = useState<ImageData[]>([]);
-  const [sidebarWidth, setSidebarWidthState] = useState<number>(300);
-  const [thumbnailSize, setThumbnailSizeState] = useState<number>(150);
+  const [sidebarWidth, setSidebarWidthState] = useState<number>(() =>
+    loadFromLocalStorage(
+      STORAGE_KEYS.SIDEBAR_WIDTH,
+      calculateInitialSidebarWidth(),
+      (val) => typeof val === "number" && val >= 200 && val <= 800
+    )
+  );
+  const [thumbnailSize, setThumbnailSizeState] = useState<number>(() =>
+    loadFromLocalStorage(
+      STORAGE_KEYS.THUMBNAIL_SIZE,
+      150,
+      (val) => typeof val === "number" && val >= 80 && val <= 300
+    )
+  );
+  const [sortOrder, setSortOrderState] = useState<SortOrder>(() =>
+    loadFromLocalStorage<SortOrder>(
+      STORAGE_KEYS.SORT_ORDER,
+      "desc",
+      (val) => val === "desc" || val === "asc"
+    )
+  );
   const [currentPage, setCurrentPageState] = useState<number>(1);
   const [hasMore, setHasMoreState] = useState<boolean>(false);
   const [isLoading, setIsLoadingState] = useState<boolean>(false);
-  const [scrollPosition, setScrollPositionState] = useState<number>(0);
-
-  // Load persisted values from localStorage on mount
-  useEffect(() => {
-    try {
-      // Restore sidebar width
-      const savedWidth = localStorage.getItem(STORAGE_KEYS.SIDEBAR_WIDTH);
-      if (savedWidth) {
-        const width = parseInt(savedWidth, 10);
-        if (!isNaN(width) && width >= 200 && width <= 800) {
-          setSidebarWidthState(width);
-        }
-      }
-
-      // Restore thumbnail size
-      const savedThumbnailSize = localStorage.getItem(STORAGE_KEYS.THUMBNAIL_SIZE);
-      if (savedThumbnailSize) {
-        const size = parseInt(savedThumbnailSize, 10);
-        if (!isNaN(size) && size >= 80 && size <= 300) {
-          setThumbnailSizeState(size);
-        }
-      }
-    } catch (error) {
-      console.error("Error loading persisted sidebar state:", error);
-    }
-  }, []);
+  const [scrollPosition, setScrollPositionState] = useState<number>(() =>
+    loadFromLocalStorage(
+      STORAGE_KEYS.SCROLL_POSITION,
+      0,
+      (val) => typeof val === "number" && val >= 0
+    )
+  );
+  const [selectedImageForModal, setSelectedImageForModal] =
+    useState<ImageData | null>(null);
 
   // Persist sidebar width to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEYS.SIDEBAR_WIDTH, sidebarWidth.toString());
+      localStorage.setItem(
+        STORAGE_KEYS.SIDEBAR_WIDTH,
+        JSON.stringify(sidebarWidth)
+      );
     } catch (error) {
       console.error("Error persisting sidebar width:", error);
     }
@@ -163,11 +235,54 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
   // Persist thumbnail size to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEYS.THUMBNAIL_SIZE, thumbnailSize.toString());
+      localStorage.setItem(
+        STORAGE_KEYS.THUMBNAIL_SIZE,
+        JSON.stringify(thumbnailSize)
+      );
     } catch (error) {
       console.error("Error persisting thumbnail size:", error);
     }
   }, [thumbnailSize]);
+
+  // Persist sort order to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.SORT_ORDER,
+        JSON.stringify(sortOrder)
+      );
+    } catch (error) {
+      console.error("Error persisting sort order:", error);
+    }
+  }, [sortOrder]);
+
+  // Persist selected album to localStorage
+  useEffect(() => {
+    try {
+      if (directoryPath) {
+        localStorage.setItem(
+          STORAGE_KEYS.SELECTED_ALBUM,
+          JSON.stringify(directoryPath)
+        );
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.SELECTED_ALBUM);
+      }
+    } catch (error) {
+      console.error("Error persisting selected album:", error);
+    }
+  }, [directoryPath]);
+
+  // Persist scroll position to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.SCROLL_POSITION,
+        JSON.stringify(scrollPosition)
+      );
+    } catch (error) {
+      console.error("Error persisting scroll position:", error);
+    }
+  }, [scrollPosition]);
 
   /**
    * Set the selected album name
@@ -209,6 +324,13 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
   };
 
   /**
+   * Update sort order
+   */
+  const setSortOrder = (order: SortOrder) => {
+    setSortOrderState(order);
+  };
+
+  /**
    * Clear directory and reset all state
    */
   const clearDirectory = () => {
@@ -217,6 +339,7 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
     setCurrentPageState(1);
     setHasMoreState(false);
     setIsLoadingState(false);
+    setScrollPositionState(0);
   };
 
   /**
@@ -247,26 +370,45 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
     setScrollPositionState(position);
   };
 
+  /**
+   * Open image modal with selected image
+   */
+  const openImageModal = (image: ImageData) => {
+    setSelectedImageForModal(image);
+  };
+
+  /**
+   * Close image modal
+   */
+  const closeImageModal = () => {
+    setSelectedImageForModal(null);
+  };
+
   // Context value
   const value: SidebarContextType = {
     directoryPath,
     images,
     sidebarWidth,
     thumbnailSize,
+    sortOrder,
     currentPage,
     hasMore,
     isLoading,
     scrollPosition,
+    selectedImageForModal,
     setDirectory,
     setImages,
     addImages,
     setSidebarWidth,
     setThumbnailSize,
+    setSortOrder,
     clearDirectory,
     setCurrentPage,
     setHasMore,
     setIsLoading,
     setScrollPosition,
+    openImageModal,
+    closeImageModal,
   };
 
   return (

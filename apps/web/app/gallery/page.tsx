@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { Navigation } from "@/components/Navigation";
 
 interface GalleryImage {
   filename: string;
@@ -268,38 +269,32 @@ export default function GalleryPage() {
   return (
     <div className="min-h-screen bg-white">
       {/* Top bar with navigation */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-        <h1 className="text-xl font-semibold">Gallery</h1>
-        <div className="flex items-center gap-4">
-          {selectedCount > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">
-                {selectedCount} {selectedCount === 1 ? "image" : "images"}{" "}
-                selected
-              </span>
-              <Button
-                variant="default"
-                onClick={handleSync}
-                disabled={syncing || selectedCount === 0}
-              >
-                {syncing ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Syncing...
-                  </>
-                ) : (
-                  `Sync ${selectedCount} ${
-                    selectedCount === 1 ? "Image" : "Images"
-                  }`
-                )}
-              </Button>
-            </div>
-          )}
-          <Link href="/">
-            <Button variant="outline">Back to Editor</Button>
-          </Link>
-        </div>
-      </div>
+      <Navigation>
+        {selectedCount > 0 && (
+          <>
+            <span className="text-sm text-gray-600">
+              {selectedCount} {selectedCount === 1 ? "image" : "images"}{" "}
+              selected
+            </span>
+            <Button
+              variant="default"
+              onClick={handleSync}
+              disabled={syncing || selectedCount === 0}
+            >
+              {syncing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Syncing...
+                </>
+              ) : (
+                `Sync ${selectedCount} ${
+                  selectedCount === 1 ? "Image" : "Images"
+                }`
+              )}
+            </Button>
+          </>
+        )}
+      </Navigation>
 
       {/* Sync progress bar */}
       {syncing && (
