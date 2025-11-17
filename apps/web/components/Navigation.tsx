@@ -19,14 +19,14 @@ export function Navigation({ children }: NavigationProps) {
   };
 
   return (
-    <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+    <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-background">
       <div className="flex items-center gap-1">
         <Link href="/">
           <button
             className={`flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors ${
               isActive("/")
-                ? "bg-gray-100 text-gray-900 font-medium"
-                : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                ? "bg-secondary text-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
             }`}
           >
             <Home className="h-4 w-4" />
@@ -37,8 +37,8 @@ export function Navigation({ children }: NavigationProps) {
           <button
             className={`px-3 py-2 text-sm rounded-md transition-colors ${
               isActive("/gallery")
-                ? "bg-gray-100 text-gray-900 font-medium"
-                : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                ? "bg-secondary text-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
             }`}
           >
             Gallery
@@ -48,8 +48,8 @@ export function Navigation({ children }: NavigationProps) {
           <button
             className={`px-3 py-2 text-sm rounded-md transition-colors ${
               isActive("/settings")
-                ? "bg-gray-100 text-gray-900 font-medium"
-                : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                ? "bg-secondary text-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
             }`}
           >
             Settings

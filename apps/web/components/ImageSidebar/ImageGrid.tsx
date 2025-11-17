@@ -184,8 +184,8 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
         {/* Loading indicator at bottom */}
         {isLoading && (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
-            <span className="ml-2 text-sm text-gray-600">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <span className="ml-2 text-sm text-muted-foreground">
               Loading more images...
             </span>
           </div>
@@ -194,7 +194,7 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
         {/* End of list indicator */}
         {!hasMore && images.length > 0 && (
           <div className="flex items-center justify-center py-8">
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-muted-foreground">
               No more images to load
             </span>
           </div>

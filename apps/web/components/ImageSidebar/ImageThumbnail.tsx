@@ -48,7 +48,7 @@ export function ImageThumbnail({ image, size }: ImageThumbnailProps) {
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onDoubleClick={handleDoubleClick}
-      className={`relative rounded-lg overflow-hidden cursor-move border-2 border-transparent hover:border-blue-400 transition-all bg-gray-50 ${
+      className={`relative rounded-lg overflow-hidden cursor-move border-2 border-transparent hover:border-primary transition-all bg-muted ${
         isDragging ? "opacity-50" : "opacity-100"
       }`}
       style={{ 
@@ -59,9 +59,9 @@ export function ImageThumbnail({ image, size }: ImageThumbnailProps) {
       {imageError ? (
         // Show placeholder icon if thumbnail fails to load
         <div
-          className="flex items-center justify-center bg-gray-100 w-full h-full"
+          className="flex items-center justify-center bg-muted w-full h-full"
         >
-          <ImageOff className="w-12 h-12 text-gray-400" />
+          <ImageOff className="w-12 h-12 text-muted-foreground" />
         </div>
       ) : (
         <div className="w-full h-full flex items-center justify-center">
@@ -77,7 +77,7 @@ export function ImageThumbnail({ image, size }: ImageThumbnailProps) {
       )}
 
       {/* Filename tooltip on hover */}
-      <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-xs p-1 truncate opacity-0 hover:opacity-100 transition-opacity">
+      <div className="absolute bottom-0 left-0 right-0 bg-black/60 dark:bg-black/80 text-white text-xs p-1 truncate opacity-0 hover:opacity-100 transition-opacity">
         {image.filename}
       </div>
     </div>

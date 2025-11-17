@@ -27,6 +27,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import Slot from "./Slot";
 import ImageLayer from "./ImageLayer";
+import { ImageEditButton } from "./ImageEditButton";
 
 interface CanvasEditorProps {
   template: Template;
@@ -53,6 +54,35 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
     });
     const [hoveredSlotId, setHoveredSlotId] = useState<string | null>(null);
     const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
+    const [activeEditSlotId, setActiveEditSlotId] = useState<string | null>(null);
+    const [hoveringEditButtonSlotId, setHoveringEditButtonSlotId] = useState<string | null>(null);
+
+    const hoverClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const hoveringEditButtonSlotIdRef = useRef<string | null>(null);
+    const activeEditSlotIdRef = useRef<string | null>(null);
+
+    useEffect(() => {
+      hoveringEditButtonSlotIdRef.current = hoveringEditButtonSlotId;
+    }, [hoveringEditButtonSlotId]);
+
+    useEffect(() => {
+      activeEditSlotIdRef.current = activeEditSlotId;
+    }, [activeEditSlotId]);
+
+    useEffect(() => {
+      return () => {
+        if (hoverClearTimeoutRef.current) {
+          clearTimeout(hoverClearTimeoutRef.current);
+        }
+      };
+    }, []);
+
+    const clearHoverTimeout = useCallback(() => {
+      if (hoverClearTimeoutRef.current) {
+        clearTimeout(hoverClearTimeoutRef.current);
+        hoverClearTimeoutRef.current = null;
+      }
+    }, []);
 
     useEffect(() => {
       const updateCanvasSize = () => {
@@ -420,6 +450,11 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
             clipHeight: slotHeight,
           });
 
+          // Handle horizontal mirroring
+          const mirrorX = assignment.mirrorX ?? false;
+          const imageScaleX = mirrorX ? -1 : 1;
+          const imageOffsetX = mirrorX ? imageWidth : 0;
+
           // Create image node
           const konvaImage = new Konva.Image({
             image: image,
@@ -427,7 +462,42 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
             y: imageY,
             width: imageWidth,
             height: imageHeight,
+            scaleX: imageScaleX,
+            offsetX: imageOffsetX,
           });
+
+          // Apply filters if any are set
+          const filters: any[] = [];
+          
+          if (assignment.brightness !== undefined && assignment.brightness !== 0) {
+            filters.push(Konva.Filters.Brighten);
+          }
+          
+          if (assignment.contrast !== undefined && assignment.contrast !== 0) {
+            filters.push(Konva.Filters.Contrast);
+          }
+          
+          if (assignment.saturation !== undefined && assignment.saturation !== 0) {
+            filters.push(Konva.Filters.HSL);
+          }
+
+          if (filters.length > 0) {
+            konvaImage.filters(filters);
+            
+            if (assignment.brightness !== undefined && assignment.brightness !== 0) {
+              konvaImage.brightness(assignment.brightness / 100);
+            }
+            
+            if (assignment.contrast !== undefined && assignment.contrast !== 0) {
+              konvaImage.contrast(assignment.contrast);
+            }
+            
+            if (assignment.saturation !== undefined && assignment.saturation !== 0) {
+              konvaImage.saturation(assignment.saturation / 50);
+            }
+            
+            konvaImage.cache();
+          }
 
           clipGroup.add(konvaImage);
           exportLayer.add(clipGroup);
@@ -475,13 +545,68 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       }
     }, []);
 
-    const handleSlotMouseEnter = useCallback((slotId: string) => {
-      setHoveredSlotId(slotId);
-    }, []);
+    const handleSlotMouseEnter = useCallback(
+      (slotId: string) => {
+        clearHoverTimeout();
+        setHoveredSlotId(slotId);
+      },
+      [clearHoverTimeout]
+    );
 
-    const handleSlotMouseLeave = useCallback(() => {
-      setHoveredSlotId(null);
-    }, []);
+    const handleSlotMouseLeave = useCallback(
+      (slotId: string) => {
+        clearHoverTimeout();
+        hoverClearTimeoutRef.current = setTimeout(() => {
+          setHoveredSlotId((current) => {
+            if (current !== slotId) {
+              return current;
+            }
+
+            if (
+              hoveringEditButtonSlotIdRef.current === slotId ||
+              activeEditSlotIdRef.current === slotId
+            ) {
+              return current;
+            }
+
+            return null;
+          });
+          hoverClearTimeoutRef.current = null;
+        }, 80);
+      },
+      [clearHoverTimeout]
+    );
+    const handleEditButtonMouseEnter = useCallback(
+      (slotId: string) => {
+        clearHoverTimeout();
+        setHoveringEditButtonSlotId(slotId);
+        setHoveredSlotId(slotId);
+      },
+      [clearHoverTimeout]
+    );
+
+    const handleEditButtonMouseLeave = useCallback(
+      (slotId: string) => {
+        clearHoverTimeout();
+        setHoveringEditButtonSlotId((current) =>
+          current === slotId ? null : current
+        );
+
+        setHoveredSlotId((current) => {
+          if (current !== slotId) {
+            return current;
+          }
+
+          if (activeEditSlotId === slotId) {
+            return current;
+          }
+
+          return null;
+        });
+      },
+      [activeEditSlotId, clearHoverTimeout]
+    );
+
 
     const handleSlotClick = useCallback(
       (slotId: string) => {
@@ -540,6 +665,43 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       [setImageAssignments]
     );
 
+    const handleFilterUpdate = useCallback(
+      (slotId: string) => {
+        return (updates: Partial<ImageAssignment>) => {
+          setImageAssignments((prev) => {
+            const newMap = new Map(prev);
+            const existingAssignment = newMap.get(slotId);
+            if (existingAssignment) {
+              newMap.set(slotId, {
+                ...existingAssignment,
+                ...updates,
+              });
+            }
+            return newMap;
+          });
+        };
+      },
+      [setImageAssignments]
+    );
+
+    const handleEditMenuOpenChange = useCallback(
+      (slotId: string) => {
+        return (open: boolean) => {
+          setActiveEditSlotId((prev) => {
+            if (open) {
+              return slotId;
+            }
+            return prev === slotId ? null : prev;
+          });
+
+          if (open) {
+            setHoveredSlotId(slotId);
+          }
+        };
+      },
+      [setHoveredSlotId]
+    );
+
     // Memoize image assignments array to prevent unnecessary re-renders
     const imageAssignmentsArray = useMemo(
       () => Array.from(imageAssignments.entries()),
@@ -568,7 +730,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
     return (
       <div
         ref={containerRef}
-        className="w-full h-full"
+        className="w-full h-full relative"
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
@@ -589,7 +751,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
                 scaleY={scaleY}
                 isHovered={hoveredSlotId === slot.id}
                 onMouseEnter={() => handleSlotMouseEnter(slot.id)}
-                onMouseLeave={handleSlotMouseLeave}
+                onMouseLeave={() => handleSlotMouseLeave(slot.id)}
                 onClick={handleSlotClick(slot.id)}
               />
             ))}
@@ -608,6 +770,8 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
                   onSelect={() => handleImageSelect(slotId)}
                   onTransformUpdate={handleTransformUpdate(slotId)}
                   onScaleUpdate={handleScaleUpdate(slotId)}
+                  onMouseEnter={() => handleSlotMouseEnter(slotId)}
+                  onMouseLeave={() => handleSlotMouseLeave(slotId)}
                 />
               );
             })}
@@ -636,6 +800,41 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
             })()}
           </Layer>
         </Stage>
+
+        {/* HTML overlay for edit buttons */}
+        <div className="absolute inset-0 pointer-events-none">
+          {imageAssignmentsArray.map(([slotId, assignment]) => {
+            const slot = template.slots.find((s) => s.id === slotId);
+            if (!slot) return null;
+            
+            // Only show edit button when slot is hovered or edit menu is active
+            const isButtonVisible = hoveredSlotId === slotId || activeEditSlotId === slotId;
+            
+            // Calculate button position (top-right corner of slot)
+            const slotX = (slot.x / 100) * CANVAS_WIDTH * scaleX;
+            const slotY = (slot.y / 100) * CANVAS_HEIGHT * scaleY;
+            const slotWidth = (slot.width / 100) * CANVAS_WIDTH * scaleX;
+            
+            const buttonX = slotX + slotWidth - 40; // 40px from right edge
+            const buttonY = slotY + 8; // 8px from top edge
+            
+            return (
+              <ImageEditButton
+                key={`edit-${slotId}`}
+                assignment={assignment}
+                onUpdate={handleFilterUpdate(slotId)}
+                onMouseEnter={() => handleEditButtonMouseEnter(slotId)}
+                onMouseLeave={() => handleEditButtonMouseLeave(slotId)}
+                visible={isButtonVisible}
+                onOpenChange={handleEditMenuOpenChange(slotId)}
+                style={{
+                  top: `${buttonY}px`,
+                  left: `${buttonX}px`,
+                }}
+              />
+            );
+          })}
+        </div>
       </div>
     );
   }

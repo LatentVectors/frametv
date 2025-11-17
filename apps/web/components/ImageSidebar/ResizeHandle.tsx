@@ -15,8 +15,8 @@ interface ResizeHandleProps {
 export function ResizeHandle({ onMouseDown, isResizing }: ResizeHandleProps) {
   return (
     <div
-      className={`absolute top-0 right-0 bottom-0 w-2 cursor-col-resize z-20 hover:bg-gray-300 transition-colors ${
-        isResizing ? 'bg-gray-400' : 'bg-transparent'
+      className={`absolute top-0 right-0 bottom-0 w-2 cursor-col-resize z-20 hover:bg-border transition-colors ${
+        isResizing ? 'bg-muted-foreground' : 'bg-transparent'
       }`}
       onMouseDown={onMouseDown}
       style={{

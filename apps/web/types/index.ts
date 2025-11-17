@@ -21,6 +21,11 @@ export interface ImageAssignment {
   scaleY: number;
   originalWidth?: number; // Original image width for preview scaling calculations
   originalHeight?: number; // Original image height for preview scaling calculations
+  // Photo editing filters (non-destructive)
+  mirrorX?: boolean; // Horizontal flip
+  brightness?: number; // Range: -100 to 100 (default: 0)
+  contrast?: number; // Range: -100 to 100 (default: 0)
+  saturation?: number; // Range: -100 to 100 (default: 0)
 }
 
 /**

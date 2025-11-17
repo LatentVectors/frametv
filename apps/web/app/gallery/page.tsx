@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Navigation } from "@/components/Navigation";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 interface GalleryImage {
   filename: string;
@@ -246,10 +247,10 @@ export default function GalleryPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
-          <p className="text-gray-500">Loading gallery...</p>
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <p className="text-muted-foreground">Loading gallery...</p>
         </div>
       </div>
     );
@@ -257,9 +258,9 @@ export default function GalleryPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
-          <p className="text-red-500">{error}</p>
+          <p className="text-destructive">{error}</p>
           <Button onClick={() => loadImages(1)}>Retry</Button>
         </div>
       </div>
@@ -267,12 +268,12 @@ export default function GalleryPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-background">
       {/* Top bar with navigation */}
       <Navigation>
         {selectedCount > 0 && (
           <>
-            <span className="text-sm text-gray-600">
+            <span className="text-sm text-muted-foreground">
               {selectedCount} {selectedCount === 1 ? "image" : "images"}{" "}
               selected
             </span>
@@ -294,19 +295,20 @@ export default function GalleryPage() {
             </Button>
           </>
         )}
+        <ThemeToggle />
       </Navigation>
 
       {/* Sync progress bar */}
       {syncing && (
-        <div className="px-6 py-2 border-b border-gray-200 bg-gray-50">
+        <div className="px-6 py-2 border-b border-border bg-muted">
           <div className="flex items-center gap-2">
-            <div className="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
+            <div className="flex-1 bg-secondary rounded-full h-2 overflow-hidden">
               <div
-                className="bg-blue-500 h-full animate-pulse"
+                className="bg-primary h-full animate-pulse"
                 style={{ width: "100%" }}
               />
             </div>
-            <span className="text-xs text-gray-600 min-w-[60px] text-right">
+            <span className="text-xs text-muted-foreground min-w-[60px] text-right">
               Syncing...
             </span>
           </div>
@@ -315,9 +317,9 @@ export default function GalleryPage() {
 
       {/* TV configuration banner */}
       {tvConfigured === false && (
-        <div className="px-6 py-3 bg-yellow-50 border-b border-yellow-200">
+        <div className="px-6 py-3 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800">
           <div className="flex items-center justify-between">
-            <p className="text-sm text-yellow-800">
+            <p className="text-sm text-yellow-800 dark:text-yellow-200">
               TV not configured. Please go to{" "}
               <Link href="/settings" className="underline font-medium">
                 Settings
@@ -331,7 +333,7 @@ export default function GalleryPage() {
       {/* Gallery content */}
       {images.length === 0 ? (
         <div className="flex items-center justify-center min-h-[60vh]">
-          <p className="text-gray-500">
+          <p className="text-muted-foreground">
             No images saved yet. Create some in the editor!
           </p>
         </div>
@@ -348,10 +350,10 @@ export default function GalleryPage() {
                 return (
                   <div key={image.filename} className="mb-4 break-inside-avoid">
                     <div
-                      className={`relative group cursor-pointer rounded-lg overflow-hidden bg-gray-100 border-2 transition-all ${
+                      className={`relative group cursor-pointer rounded-lg overflow-hidden bg-muted border-2 transition-all ${
                         isSelected
-                          ? "border-blue-500 ring-2 ring-blue-200"
-                          : "border-transparent hover:border-gray-300"
+                          ? "border-primary ring-2 ring-primary/20"
+                          : "border-transparent hover:border-border"
                       }`}
                       onClick={() => toggleImageSelection(image.filename)}
                     >
@@ -366,7 +368,7 @@ export default function GalleryPage() {
                         }}
                       />
                       {isSelected && (
-                        <div className="absolute top-2 right-2 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-semibold">
+                        <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-semibold">
                           ✓
                         </div>
                       )}
@@ -380,7 +382,7 @@ export default function GalleryPage() {
           {/* Loading more indicator */}
           {loadingMore && (
             <div className="flex justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           )}
 
@@ -390,7 +392,7 @@ export default function GalleryPage() {
           {/* End of gallery message */}
           {!hasMore && images.length > 0 && (
             <div className="flex justify-center py-8">
-              <p className="text-gray-500 text-sm">
+              <p className="text-muted-foreground text-sm">
                 All {images.length} images loaded
               </p>
             </div>

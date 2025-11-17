@@ -17,6 +17,7 @@ import { SidebarProvider, useSidebar } from "@/contexts/SidebarContext";
 import { Navigation } from "@/components/Navigation";
 import { ImageSidebar } from "@/components/ImageSidebar";
 import { useResizableSidebar } from "@/hooks/useResizableSidebar";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 // Dynamically import CanvasEditor to avoid SSR issues with Konva
 const CanvasEditor = dynamic(() => import("@/components/CanvasEditor"), {
@@ -117,7 +118,7 @@ function HomeContent() {
     imageAssignments.size > 0;
 
   return (
-    <main className="flex h-screen flex-col bg-white">
+    <main className="flex h-screen flex-col bg-background">
       {/* Top bar - full width */}
       <Navigation>
         <TemplateSelector
@@ -129,6 +130,7 @@ function HomeContent() {
           disabled={isSaving || !allSlotsFilled || !isDirty}
           isSaving={isSaving}
         />
+        <ThemeToggle />
       </Navigation>
 
       {/* Main content area - flexbox horizontal layout */}
@@ -141,10 +143,10 @@ function HomeContent() {
         />
 
         {/* Canvas area - centered and responsive */}
-        <div className="flex-1 flex items-center justify-center p-6 overflow-hidden">
+        <div className="flex-1 flex items-center justify-center p-6 overflow-hidden bg-background">
           {/* Canvas container with 16:9 aspect ratio */}
           <div
-            className="relative bg-white border border-gray-200 shadow-sm"
+            className="relative bg-card border border-border shadow-sm"
             style={{
               width: "100%",
               maxWidth: "100%",

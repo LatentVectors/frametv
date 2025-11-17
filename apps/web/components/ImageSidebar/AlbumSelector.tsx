@@ -24,8 +24,16 @@ interface AlbumsResponse {
 }
 
 export function AlbumSelector() {
-  const { directoryPath, setDirectory, setImages, setHasMore, setCurrentPage, setIsLoading, setScrollPosition, sortOrder } =
-    useSidebar();
+  const {
+    directoryPath,
+    setDirectory,
+    setImages,
+    setHasMore,
+    setCurrentPage,
+    setIsLoading,
+    setScrollPosition,
+    sortOrder,
+  } = useSidebar();
   const [albums, setAlbums] = useState<Album[]>([]);
   const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null);
   const [isLoading, setIsLoadingState] = useState(false);
@@ -83,13 +91,13 @@ export function AlbumSelector() {
   const handleAlbumSelect = async (albumName: string) => {
     try {
       setError(null);
-      
+
       // If selecting a different album, reset scroll position
       if (albumName !== directoryPath) {
         setSelectedAlbum(albumName);
         setScrollPosition(0);
       }
-      
+
       setIsLoading(true);
 
       // Set directory in context
@@ -158,11 +166,11 @@ export function AlbumSelector() {
   // Empty state
   if (!isLoading && albums.length === 0 && !error) {
     return (
-      <div className="flex flex-col items-center justify-center p-6">
-        <p className="text-sm font-medium text-gray-900 mb-2">
+      <div className="flex flex-col p-6">
+        <p className="text-sm font-medium text-foreground mb-2 text-center">
           No albums found.
         </p>
-        <div className="text-sm text-gray-600 text-center space-y-1">
+        <div className="text-sm text-muted-foreground space-y-1">
           <p>To add albums:</p>
           <ol className="list-decimal list-inside space-y-1">
             <li>Create folders in &lt;project-root&gt;/data/albums/</li>
@@ -174,7 +182,7 @@ export function AlbumSelector() {
           onClick={handleRefresh}
           variant="outline"
           size="sm"
-          className="mt-4"
+          className="mt-4 self-center"
         >
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
@@ -215,12 +223,12 @@ export function AlbumSelector() {
         </Button>
         <div className="relative">
           <Info
-            className="h-4 w-4 text-gray-400 cursor-help"
+            className="h-4 w-4 text-muted-foreground cursor-help"
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
           />
           {showTooltip && (
-            <div className="absolute left-0 top-full mt-2 w-64 p-3 bg-gray-900 text-white text-xs rounded shadow-lg z-20">
+            <div className="absolute left-0 top-full mt-2 w-64 p-3 bg-popover text-popover-foreground text-xs rounded shadow-lg z-20 border border-border">
               <div className="space-y-2">
                 <p className="font-semibold">How to add albums:</p>
                 <ol className="list-decimal list-inside space-y-1 ml-2">
@@ -242,15 +250,17 @@ export function AlbumSelector() {
       </div>
 
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800">
+        <div className="p-3 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive">
           {error}
         </div>
       )}
 
       {isLoading && albums.length === 0 && (
         <div className="flex items-center justify-center py-4">
-          <RefreshCw className="h-4 w-4 animate-spin text-gray-400 mr-2" />
-          <span className="text-sm text-gray-600">Loading albums...</span>
+          <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground mr-2" />
+          <span className="text-sm text-muted-foreground">
+            Loading albums...
+          </span>
         </div>
       )}
     </div>

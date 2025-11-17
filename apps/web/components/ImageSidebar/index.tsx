@@ -133,7 +133,7 @@ function SidebarHeader() {
   };
 
   return (
-    <div className="sticky top-0 bg-white z-10">
+    <div className="sticky top-0 bg-background z-10">
       {isCollapsed ? (
         // Collapsed header - minimal icon only
         <div className="absolute top-2 right-9 z-20">
@@ -142,30 +142,30 @@ function SidebarHeader() {
               variant="ghost"
               size="sm"
               onClick={toggleCollapse}
-              className="h-8 w-8 p-0 rounded-full bg-white/80 backdrop-blur-sm hover:bg-white shadow-sm"
+              className="h-8 w-8 p-0 rounded-full bg-background/80 backdrop-blur-sm hover:bg-secondary shadow-sm"
             >
-              <SlidersHorizontal className="h-4 w-4 text-gray-600" />
+              <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
             </Button>
             {/* Tooltip on hover */}
-            <div className="absolute right-full mr-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-gray-900 text-white text-xs rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            <div className="absolute right-full mr-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
               Show Controls
             </div>
           </div>
         </div>
       ) : (
         // Expanded header - full view
-        <div className="p-4 space-y-4 border-b border-gray-200">
+        <div className="p-4 space-y-4 border-b border-border">
           <div className="flex items-center justify-between">
             <div className="flex-1 min-w-0 relative">
               <div
-                className="text-sm font-medium text-gray-900 truncate cursor-default"
+                className="text-sm font-medium text-foreground truncate cursor-default"
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
               >
                 {displayName}
               </div>
               {showTooltip && directoryPath.length > 30 && (
-                <div className="absolute left-0 top-full mt-1 px-2 py-1 bg-gray-900 text-white text-xs rounded shadow-lg z-20 whitespace-nowrap">
+                <div className="absolute left-0 top-full mt-1 px-2 py-1 bg-popover text-popover-foreground text-xs rounded shadow-lg z-20 whitespace-nowrap">
                   {directoryPath}
                 </div>
               )}
@@ -183,10 +183,10 @@ function SidebarHeader() {
           {/* Thumbnail Size Slider */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-gray-700">
+              <label className="text-xs font-medium text-foreground">
                 Thumbnail Size
               </label>
-              <span className="text-xs text-gray-500">{thumbnailSize}px</span>
+              <span className="text-xs text-muted-foreground">{thumbnailSize}px</span>
             </div>
             <Slider
               value={[thumbnailSize]}
@@ -201,7 +201,7 @@ function SidebarHeader() {
           {/* Sort Order Toggle */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-gray-700">
+              <label className="text-xs font-medium text-foreground">
                 Sort Order
               </label>
               <div className="relative group">
@@ -225,12 +225,12 @@ function SidebarHeader() {
           </div>
 
           {/* Collapse button */}
-          <div className="flex items-center justify-center pt-2 border-t border-gray-100">
+          <div className="flex items-center justify-center pt-2 border-t border-border">
             <Button
               variant="ghost"
               size="sm"
               onClick={toggleCollapse}
-              className="w-full flex items-center justify-center gap-2 text-gray-600 hover:text-gray-900"
+              className="w-full flex items-center justify-center gap-2"
             >
               <ChevronUp className="h-4 w-4" />
               <span className="text-xs">Hide Controls</span>
@@ -252,6 +252,7 @@ function SidebarContent({ width }: { width: number }) {
     setHasMore,
     setCurrentPage,
     setIsLoading,
+    clearDirectory,
   } = useSidebar();
   const [hasAttemptedLoad, setHasAttemptedLoad] = useState(false);
 
@@ -285,6 +286,12 @@ function SidebarContent({ width }: { width: number }) {
         });
 
         if (!response.ok) {
+          // If album not found, clear the invalid selection
+          if (response.status === 404) {
+            console.warn(`Saved album '${directoryPath}' no longer exists. Clearing selection.`);
+            clearDirectory();
+            return;
+          }
           throw new Error("Failed to load album images");
         }
 
@@ -294,9 +301,15 @@ function SidebarContent({ width }: { width: number }) {
           setImages(data.images);
           setHasMore(data.hasMore);
           setCurrentPage(data.page);
+        } else {
+          // If API returns unsuccessful, clear the directory
+          console.warn(`Failed to load album '${directoryPath}':`, data.error);
+          clearDirectory();
         }
       } catch (error) {
         console.error("Error auto-loading album images:", error);
+        // On any error, clear the invalid directory selection
+        clearDirectory();
       } finally {
         setIsLoading(false);
       }
@@ -313,6 +326,7 @@ function SidebarContent({ width }: { width: number }) {
     setHasMore,
     setCurrentPage,
     setIsLoading,
+    clearDirectory,
   ]);
 
   // Reset load attempt when directory changes
@@ -329,7 +343,7 @@ function SidebarContent({ width }: { width: number }) {
   if (images.length === 0 && isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-6">
-        <p className="text-sm text-gray-600 text-center">Loading images...</p>
+        <p className="text-sm text-muted-foreground text-center">Loading images...</p>
       </div>
     );
   }
@@ -338,7 +352,7 @@ function SidebarContent({ width }: { width: number }) {
   if (images.length === 0 && !isLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-6">
-        <p className="text-sm text-gray-600 text-center">
+        <p className="text-sm text-muted-foreground text-center">
           This folder is empty or contains no JPEG/PNG images.
         </p>
       </div>
@@ -359,7 +373,7 @@ export function ImageSidebar({
   return (
     <SidebarErrorBoundary>
       <div
-        className="h-full bg-white border-r border-gray-200 flex flex-col overflow-hidden relative"
+        className="h-full bg-background border-r border-border flex flex-col overflow-hidden relative"
         style={{ width: `${width}px` }}
       >
         <SidebarHeader />

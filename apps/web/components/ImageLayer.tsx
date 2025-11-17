@@ -3,8 +3,9 @@
 import { Group, Image as KonvaImage } from 'react-konva';
 import { ImageAssignment, Slot as SlotType } from '@/types';
 import { CANVAS_WIDTH, CANVAS_HEIGHT, PREVIEW_MAX_IMAGE_WIDTH, PREVIEW_MAX_IMAGE_HEIGHT } from '@/lib/config';
-import { useEffect, useState, memo, useMemo, useCallback } from 'react';
+import { useEffect, useState, memo, useMemo, useCallback, useRef } from 'react';
 import { createPreviewImage } from '@/lib/imageUtils';
+import Konva from 'konva';
 
 interface ImageLayerProps {
   assignment: ImageAssignment;
@@ -15,6 +16,8 @@ interface ImageLayerProps {
   onSelect?: () => void;
   onTransformUpdate?: (x: number, y: number) => void;
   onScaleUpdate?: (scaleX: number, scaleY: number) => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 }
 
 function ImageLayer({
@@ -26,8 +29,11 @@ function ImageLayer({
   onSelect,
   onTransformUpdate,
   onScaleUpdate,
+  onMouseEnter,
+  onMouseLeave,
 }: ImageLayerProps) {
   const [previewImage, setPreviewImage] = useState<HTMLImageElement | null>(null);
+  const imageRef = useRef<any>(null);
 
   // Load preview image (lower resolution for performance)
   useEffect(() => {
@@ -60,6 +66,49 @@ function ImageLayer({
       cancelled = true;
     };
   }, [assignment.imageUrl]);
+
+  // Apply filters when filter properties change
+  useEffect(() => {
+    if (!imageRef.current) return;
+    
+    const filters: any[] = [];
+    
+    // Apply brightness filter
+    if (assignment.brightness !== undefined && assignment.brightness !== 0) {
+      filters.push(Konva.Filters.Brighten);
+    }
+    
+    // Apply contrast filter
+    if (assignment.contrast !== undefined && assignment.contrast !== 0) {
+      filters.push(Konva.Filters.Contrast);
+    }
+    
+    // Apply saturation filter (HSL)
+    if (assignment.saturation !== undefined && assignment.saturation !== 0) {
+      filters.push(Konva.Filters.HSL);
+    }
+    
+    imageRef.current.filters(filters);
+    
+    // Set filter values
+    if (assignment.brightness !== undefined && assignment.brightness !== 0) {
+      // Brighten filter expects values from -1 to 1
+      imageRef.current.brightness(assignment.brightness / 100);
+    }
+    
+    if (assignment.contrast !== undefined && assignment.contrast !== 0) {
+      // Contrast filter expects values from -100 to 100
+      imageRef.current.contrast(assignment.contrast);
+    }
+    
+    if (assignment.saturation !== undefined && assignment.saturation !== 0) {
+      // HSL saturation expects values from -2 to 10 (we'll map -100 to 100 to -2 to 2)
+      imageRef.current.saturation(assignment.saturation / 50);
+    }
+    
+    imageRef.current.cache();
+    imageRef.current.getLayer()?.batchDraw();
+  }, [assignment.brightness, assignment.contrast, assignment.saturation]);
 
   // Convert slot percentage coordinates to canvas pixel coordinates
   const slotX = useMemo(() => (slot.x / 100) * CANVAS_WIDTH, [slot.x]);
@@ -296,6 +345,11 @@ function ImageLayer({
     return null;
   }
 
+  // Handle horizontal mirroring
+  const mirrorX = assignment.mirrorX ?? false;
+  const imageScaleX = mirrorX ? -1 : 1;
+  const imageOffsetX = mirrorX ? previewWidth : 0;
+
   return (
     <Group
       clipX={previewSlotX}
@@ -304,17 +358,22 @@ function ImageLayer({
       clipHeight={previewSlotHeight}
     >
       <KonvaImage
+        ref={imageRef}
         image={previewImage}
         x={previewX}
         y={previewY}
         width={previewWidth}
         height={previewHeight}
+        scaleX={imageScaleX}
+        offsetX={imageOffsetX}
         draggable={true}
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
         onClick={handleImageClick}
         onTap={handleImageClick}
         onWheel={handleWheel}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
       />
     </Group>
   );

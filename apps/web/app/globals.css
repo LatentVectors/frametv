@@ -76,7 +76,7 @@
   }
 
   .scrollbar-hover:hover {
-    scrollbar-color: rgb(203 213 225) transparent;
+    scrollbar-color: hsl(var(--border)) transparent;
   }
 
   /* Webkit browsers (Chrome, Safari, Edge) */
@@ -95,11 +95,11 @@
   }
 
   .scrollbar-hover:hover::-webkit-scrollbar-thumb {
-    background-color: rgb(203 213 225);
+    background-color: hsl(var(--border));
   }
 
   .scrollbar-hover:hover::-webkit-scrollbar-thumb:hover {
-    background-color: rgb(148 163 184);
+    background-color: hsl(var(--muted-foreground));
   }
 }
 
