@@ -3,10 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import {
-  CANVAS_WIDTH,
-  CANVAS_HEIGHT,
-} from "@/lib/config";
+import { CANVAS_WIDTH, CANVAS_HEIGHT } from "@/lib/config";
 import { Template, ImageAssignment } from "@/types";
 import { getDefaultTemplate } from "@/lib/templates";
 import TemplateSelector from "@/components/TemplateSelector";
@@ -18,6 +15,7 @@ import { Navigation } from "@/components/Navigation";
 import { ImageSidebar } from "@/components/ImageSidebar";
 import { useResizableSidebar } from "@/hooks/useResizableSidebar";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { ImageEditPanel } from "@/components/ImageEditPanel";
 
 // Dynamically import CanvasEditor to avoid SSR issues with Konva
 const CanvasEditor = dynamic(() => import("@/components/CanvasEditor"), {
@@ -34,6 +32,7 @@ function HomeContent() {
   const [imageAssignments, setImageAssignments] = useState<
     Map<string, ImageAssignment>
   >(new Map());
+  const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const { toast } = useToast();
 
   // Sidebar state from context
@@ -51,9 +50,35 @@ function HomeContent() {
     setSelectedTemplate(template);
     // Clear image assignments when template changes
     setImageAssignments(new Map());
+    // Clear selection
+    setSelectedSlotId(null);
     // Reset dirty flag since canvas is now empty
     setIsDirty(false);
   };
+
+  const handleFilterUpdate = useCallback(
+    (updates: Partial<ImageAssignment>) => {
+      if (!selectedSlotId) return;
+
+      setImageAssignments((prev) => {
+        const newMap = new Map(prev);
+        const existingAssignment = newMap.get(selectedSlotId);
+        if (existingAssignment) {
+          newMap.set(selectedSlotId, {
+            ...existingAssignment,
+            ...updates,
+          });
+        }
+        return newMap;
+      });
+    },
+    [selectedSlotId]
+  );
+
+  // Get the selected slot's assignment
+  const selectedAssignment = selectedSlotId
+    ? imageAssignments.get(selectedSlotId) || null
+    : null;
 
   const handleExportReady = useCallback((handle: CanvasEditorHandle) => {
     canvasEditorHandleRef.current = handle;
@@ -143,27 +168,43 @@ function HomeContent() {
         />
 
         {/* Canvas area - centered and responsive */}
-        <div className="flex-1 flex items-center justify-center p-6 overflow-hidden bg-background">
-          {/* Canvas container with 16:9 aspect ratio */}
-          <div
-            className="relative bg-card border border-border shadow-sm"
-            style={{
-              width: "100%",
-              maxWidth: "100%",
-              maxHeight: "100%",
-              aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`,
-            }}
-          >
-            {/* Canvas container div for react-konva Stage */}
-            <div id="canvas-container" className="w-full h-full">
-              <CanvasEditor
-                template={selectedTemplate}
-                onExportReady={handleExportReady}
-                imageAssignments={imageAssignments}
-                setImageAssignments={setImageAssignments}
-              />
+        <div className="flex-1 flex flex-col overflow-hidden bg-background">
+          {/* Canvas section */}
+          <div className="flex-1 flex items-center justify-center p-6 overflow-hidden min-h-0">
+            <div className="w-full h-full flex items-center justify-center">
+              {/* Canvas container with 16:9 aspect ratio */}
+              <div
+                className="relative bg-card border border-border shadow-sm"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  maxWidth: "100%",
+                  maxHeight: "100%",
+                  aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`,
+                  objectFit: "contain",
+                }}
+              >
+                {/* Canvas container div for react-konva Stage */}
+                <div id="canvas-container" className="w-full h-full">
+                  <CanvasEditor
+                    template={selectedTemplate}
+                    onExportReady={handleExportReady}
+                    imageAssignments={imageAssignments}
+                    setImageAssignments={setImageAssignments}
+                    selectedSlotId={selectedSlotId}
+                    setSelectedSlotId={setSelectedSlotId}
+                  />
+                </div>
+              </div>
             </div>
           </div>
+
+          {/* Image Edit Panel */}
+          <ImageEditPanel
+            assignment={selectedAssignment}
+            onUpdate={handleFilterUpdate}
+            disabled={!selectedSlotId || !selectedAssignment}
+          />
         </div>
       </div>
     </main>

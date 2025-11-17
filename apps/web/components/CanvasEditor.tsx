@@ -27,7 +27,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import Slot from "./Slot";
 import ImageLayer from "./ImageLayer";
-import { ImageEditButton } from "./ImageEditButton";
+import { applyTemperatureTintAttributes } from "@/lib/filters/temperatureTint";
 
 interface CanvasEditorProps {
   template: Template;
@@ -36,6 +36,8 @@ interface CanvasEditorProps {
   setImageAssignments: React.Dispatch<
     React.SetStateAction<Map<string, ImageAssignment>>
   >;
+  selectedSlotId: string | null;
+  setSelectedSlotId: (slotId: string | null) => void;
 }
 
 export interface CanvasEditorHandle {
@@ -43,7 +45,7 @@ export interface CanvasEditorHandle {
 }
 
 const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
-  ({ template, onExportReady, imageAssignments, setImageAssignments }, ref) => {
+  ({ template, onExportReady, imageAssignments, setImageAssignments, selectedSlotId, setSelectedSlotId }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const stageRef = useRef<any>(null);
     const layerRef = useRef<any>(null);
@@ -53,36 +55,6 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       height: PREVIEW_MIN_HEIGHT,
     });
     const [hoveredSlotId, setHoveredSlotId] = useState<string | null>(null);
-    const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
-    const [activeEditSlotId, setActiveEditSlotId] = useState<string | null>(null);
-    const [hoveringEditButtonSlotId, setHoveringEditButtonSlotId] = useState<string | null>(null);
-
-    const hoverClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const hoveringEditButtonSlotIdRef = useRef<string | null>(null);
-    const activeEditSlotIdRef = useRef<string | null>(null);
-
-    useEffect(() => {
-      hoveringEditButtonSlotIdRef.current = hoveringEditButtonSlotId;
-    }, [hoveringEditButtonSlotId]);
-
-    useEffect(() => {
-      activeEditSlotIdRef.current = activeEditSlotId;
-    }, [activeEditSlotId]);
-
-    useEffect(() => {
-      return () => {
-        if (hoverClearTimeoutRef.current) {
-          clearTimeout(hoverClearTimeoutRef.current);
-        }
-      };
-    }, []);
-
-    const clearHoverTimeout = useCallback(() => {
-      if (hoverClearTimeoutRef.current) {
-        clearTimeout(hoverClearTimeoutRef.current);
-        hoverClearTimeoutRef.current = null;
-      }
-    }, []);
 
     useEffect(() => {
       const updateCanvasSize = () => {
@@ -466,34 +438,76 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
             offsetX: imageOffsetX,
           });
 
-          // Apply filters if any are set
-          const filters: any[] = [];
+          // Apply filters if any are set (respecting enabled flags)
+          const filters: Konva.Filter[] = [];
           
-          if (assignment.brightness !== undefined && assignment.brightness !== 0) {
+          // Global master switch
+          const filtersEnabled = assignment.filtersEnabled ?? true;
+          
+          // Individual enabled flags (default to true)
+          const brightnessEnabled = assignment.brightnessEnabled ?? true;
+          const contrastEnabled = assignment.contrastEnabled ?? true;
+          const saturationEnabled = assignment.saturationEnabled ?? true;
+          const hueEnabled = assignment.hueEnabled ?? true;
+          const temperatureEnabled = assignment.temperatureEnabled ?? true;
+          const tintEnabled = assignment.tintEnabled ?? true;
+          
+          // Apply brightness filter (only if globally enabled, individually enabled, and has value)
+          const shouldApplyBrightness = filtersEnabled && brightnessEnabled && 
+            assignment.brightness !== undefined && assignment.brightness !== 0;
+          if (shouldApplyBrightness) {
             filters.push(Konva.Filters.Brighten);
           }
           
-          if (assignment.contrast !== undefined && assignment.contrast !== 0) {
+          // Apply contrast filter
+          const shouldApplyContrast = filtersEnabled && contrastEnabled && 
+            assignment.contrast !== undefined && assignment.contrast !== 0;
+          if (shouldApplyContrast) {
             filters.push(Konva.Filters.Contrast);
           }
           
-          if (assignment.saturation !== undefined && assignment.saturation !== 0) {
+          // Apply HSL filter (for saturation and hue)
+          const shouldApplySaturation = filtersEnabled && saturationEnabled && 
+            assignment.saturation !== undefined && assignment.saturation !== 0;
+          const shouldApplyHue = filtersEnabled && hueEnabled && 
+            assignment.hue !== undefined && assignment.hue !== 0;
+          if (shouldApplySaturation || shouldApplyHue) {
             filters.push(Konva.Filters.HSL);
           }
+          
+          // Apply temperature/tint filter
+          const shouldApplyTemperature = filtersEnabled && temperatureEnabled && 
+            assignment.temperature !== undefined && assignment.temperature !== 0;
+          const shouldApplyTint = filtersEnabled && tintEnabled && 
+            assignment.tint !== undefined && assignment.tint !== 0;
+          const temperatureTintFilter =
+            (Konva.Filters as Record<string, Konva.Filter>).TemperatureTint;
+          if ((shouldApplyTemperature || shouldApplyTint) && temperatureTintFilter) {
+            filters.push(temperatureTintFilter);
+          }
+
+          // Apply temperature and tint (only pass values if enabled)
+          const tempValue = shouldApplyTemperature ? (assignment.temperature ?? 0) : 0;
+          const tintValue = shouldApplyTint ? (assignment.tint ?? 0) : 0;
+          applyTemperatureTintAttributes(konvaImage, tempValue, tintValue);
 
           if (filters.length > 0) {
             konvaImage.filters(filters);
             
-            if (assignment.brightness !== undefined && assignment.brightness !== 0) {
-              konvaImage.brightness(assignment.brightness / 100);
+            if (shouldApplyBrightness) {
+              konvaImage.brightness(assignment.brightness! / 100);
             }
             
-            if (assignment.contrast !== undefined && assignment.contrast !== 0) {
-              konvaImage.contrast(assignment.contrast);
+            if (shouldApplyContrast) {
+              konvaImage.contrast(assignment.contrast!);
             }
             
-            if (assignment.saturation !== undefined && assignment.saturation !== 0) {
-              konvaImage.saturation(assignment.saturation / 50);
+            if (shouldApplySaturation) {
+              konvaImage.saturation(assignment.saturation! / 50);
+            }
+            
+            if (shouldApplyHue) {
+              konvaImage.hue(assignment.hue!);
             }
             
             konvaImage.cache();
@@ -545,67 +559,13 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       }
     }, []);
 
-    const handleSlotMouseEnter = useCallback(
-      (slotId: string) => {
-        clearHoverTimeout();
-        setHoveredSlotId(slotId);
-      },
-      [clearHoverTimeout]
-    );
+    const handleSlotMouseEnter = useCallback((slotId: string) => {
+      setHoveredSlotId(slotId);
+    }, []);
 
-    const handleSlotMouseLeave = useCallback(
-      (slotId: string) => {
-        clearHoverTimeout();
-        hoverClearTimeoutRef.current = setTimeout(() => {
-          setHoveredSlotId((current) => {
-            if (current !== slotId) {
-              return current;
-            }
-
-            if (
-              hoveringEditButtonSlotIdRef.current === slotId ||
-              activeEditSlotIdRef.current === slotId
-            ) {
-              return current;
-            }
-
-            return null;
-          });
-          hoverClearTimeoutRef.current = null;
-        }, 80);
-      },
-      [clearHoverTimeout]
-    );
-    const handleEditButtonMouseEnter = useCallback(
-      (slotId: string) => {
-        clearHoverTimeout();
-        setHoveringEditButtonSlotId(slotId);
-        setHoveredSlotId(slotId);
-      },
-      [clearHoverTimeout]
-    );
-
-    const handleEditButtonMouseLeave = useCallback(
-      (slotId: string) => {
-        clearHoverTimeout();
-        setHoveringEditButtonSlotId((current) =>
-          current === slotId ? null : current
-        );
-
-        setHoveredSlotId((current) => {
-          if (current !== slotId) {
-            return current;
-          }
-
-          if (activeEditSlotId === slotId) {
-            return current;
-          }
-
-          return null;
-        });
-      },
-      [activeEditSlotId, clearHoverTimeout]
-    );
+    const handleSlotMouseLeave = useCallback(() => {
+      setHoveredSlotId(null);
+    }, []);
 
 
     const handleSlotClick = useCallback(
@@ -663,43 +623,6 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
         };
       },
       [setImageAssignments]
-    );
-
-    const handleFilterUpdate = useCallback(
-      (slotId: string) => {
-        return (updates: Partial<ImageAssignment>) => {
-          setImageAssignments((prev) => {
-            const newMap = new Map(prev);
-            const existingAssignment = newMap.get(slotId);
-            if (existingAssignment) {
-              newMap.set(slotId, {
-                ...existingAssignment,
-                ...updates,
-              });
-            }
-            return newMap;
-          });
-        };
-      },
-      [setImageAssignments]
-    );
-
-    const handleEditMenuOpenChange = useCallback(
-      (slotId: string) => {
-        return (open: boolean) => {
-          setActiveEditSlotId((prev) => {
-            if (open) {
-              return slotId;
-            }
-            return prev === slotId ? null : prev;
-          });
-
-          if (open) {
-            setHoveredSlotId(slotId);
-          }
-        };
-      },
-      [setHoveredSlotId]
     );
 
     // Memoize image assignments array to prevent unnecessary re-renders
@@ -800,41 +723,6 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
             })()}
           </Layer>
         </Stage>
-
-        {/* HTML overlay for edit buttons */}
-        <div className="absolute inset-0 pointer-events-none">
-          {imageAssignmentsArray.map(([slotId, assignment]) => {
-            const slot = template.slots.find((s) => s.id === slotId);
-            if (!slot) return null;
-            
-            // Only show edit button when slot is hovered or edit menu is active
-            const isButtonVisible = hoveredSlotId === slotId || activeEditSlotId === slotId;
-            
-            // Calculate button position (top-right corner of slot)
-            const slotX = (slot.x / 100) * CANVAS_WIDTH * scaleX;
-            const slotY = (slot.y / 100) * CANVAS_HEIGHT * scaleY;
-            const slotWidth = (slot.width / 100) * CANVAS_WIDTH * scaleX;
-            
-            const buttonX = slotX + slotWidth - 40; // 40px from right edge
-            const buttonY = slotY + 8; // 8px from top edge
-            
-            return (
-              <ImageEditButton
-                key={`edit-${slotId}`}
-                assignment={assignment}
-                onUpdate={handleFilterUpdate(slotId)}
-                onMouseEnter={() => handleEditButtonMouseEnter(slotId)}
-                onMouseLeave={() => handleEditButtonMouseLeave(slotId)}
-                visible={isButtonVisible}
-                onOpenChange={handleEditMenuOpenChange(slotId)}
-                style={{
-                  top: `${buttonY}px`,
-                  left: `${buttonX}px`,
-                }}
-              />
-            );
-          })}
-        </div>
       </div>
     );
   }

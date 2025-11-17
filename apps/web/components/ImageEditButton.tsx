@@ -58,7 +58,7 @@ export function ImageEditButton({
             <Settings className="h-4 w-4 text-gray-700" />
           </button>
         </PopoverTrigger>
-        <PopoverContent className="p-0" align="start">
+        <PopoverContent className="p-0 w-[340px]">
           <ImageEditMenu assignment={assignment} onUpdate={onUpdate} />
         </PopoverContent>
       </Popover>

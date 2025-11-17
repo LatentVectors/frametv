@@ -26,6 +26,17 @@ export interface ImageAssignment {
   brightness?: number; // Range: -100 to 100 (default: 0)
   contrast?: number; // Range: -100 to 100 (default: 0)
   saturation?: number; // Range: -100 to 100 (default: 0)
+  hue?: number; // Range: -180 to 180 (default: 0)
+  temperature?: number; // Range: -100 to 100 (default: 0) - warm/cool
+  tint?: number; // Range: -100 to 100 (default: 0) - green/magenta
+  // Filter enable/disable flags
+  filtersEnabled?: boolean; // Global master switch (default: true)
+  brightnessEnabled?: boolean; // Individual toggle (default: true)
+  contrastEnabled?: boolean; // Individual toggle (default: true)
+  saturationEnabled?: boolean; // Individual toggle (default: true)
+  hueEnabled?: boolean; // Individual toggle (default: true)
+  temperatureEnabled?: boolean; // Individual toggle (default: true)
+  tintEnabled?: boolean; // Individual toggle (default: true)
 }
 
 /**

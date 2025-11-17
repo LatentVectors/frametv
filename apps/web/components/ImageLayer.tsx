@@ -5,6 +5,7 @@ import { ImageAssignment, Slot as SlotType } from '@/types';
 import { CANVAS_WIDTH, CANVAS_HEIGHT, PREVIEW_MAX_IMAGE_WIDTH, PREVIEW_MAX_IMAGE_HEIGHT } from '@/lib/config';
 import { useEffect, useState, memo, useMemo, useCallback, useRef } from 'react';
 import { createPreviewImage } from '@/lib/imageUtils';
+import { applyTemperatureTintAttributes } from '@/lib/filters/temperatureTint';
 import Konva from 'konva';
 
 interface ImageLayerProps {
@@ -73,42 +74,96 @@ function ImageLayer({
     
     const filters: any[] = [];
     
-    // Apply brightness filter
-    if (assignment.brightness !== undefined && assignment.brightness !== 0) {
+    // Global master switch
+    const filtersEnabled = assignment.filtersEnabled ?? true;
+    
+    // Individual enabled flags (default to true)
+    const brightnessEnabled = assignment.brightnessEnabled ?? true;
+    const contrastEnabled = assignment.contrastEnabled ?? true;
+    const saturationEnabled = assignment.saturationEnabled ?? true;
+    const hueEnabled = assignment.hueEnabled ?? true;
+    const temperatureEnabled = assignment.temperatureEnabled ?? true;
+    const tintEnabled = assignment.tintEnabled ?? true;
+    
+    // Apply brightness filter (only if globally enabled, individually enabled, and has value)
+    const shouldApplyBrightness = filtersEnabled && brightnessEnabled && 
+      assignment.brightness !== undefined && assignment.brightness !== 0;
+    if (shouldApplyBrightness) {
       filters.push(Konva.Filters.Brighten);
     }
     
     // Apply contrast filter
-    if (assignment.contrast !== undefined && assignment.contrast !== 0) {
+    const shouldApplyContrast = filtersEnabled && contrastEnabled && 
+      assignment.contrast !== undefined && assignment.contrast !== 0;
+    if (shouldApplyContrast) {
       filters.push(Konva.Filters.Contrast);
     }
     
-    // Apply saturation filter (HSL)
-    if (assignment.saturation !== undefined && assignment.saturation !== 0) {
+    // Apply HSL filter (for saturation and hue)
+    const shouldApplySaturation = filtersEnabled && saturationEnabled && 
+      assignment.saturation !== undefined && assignment.saturation !== 0;
+    const shouldApplyHue = filtersEnabled && hueEnabled && 
+      assignment.hue !== undefined && assignment.hue !== 0;
+    if (shouldApplySaturation || shouldApplyHue) {
       filters.push(Konva.Filters.HSL);
+    }
+    
+    // Apply temperature/tint filter
+    const shouldApplyTemperature = filtersEnabled && temperatureEnabled && 
+      assignment.temperature !== undefined && assignment.temperature !== 0;
+    const shouldApplyTint = filtersEnabled && tintEnabled && 
+      assignment.tint !== undefined && assignment.tint !== 0;
+    const temperatureTintFilter =
+      (Konva.Filters as Record<string, Konva.Filter>).TemperatureTint;
+    if ((shouldApplyTemperature || shouldApplyTint) && temperatureTintFilter) {
+      filters.push(temperatureTintFilter);
     }
     
     imageRef.current.filters(filters);
     
-    // Set filter values
-    if (assignment.brightness !== undefined && assignment.brightness !== 0) {
+    // Set filter values (only if enabled)
+    if (shouldApplyBrightness) {
       // Brighten filter expects values from -1 to 1
-      imageRef.current.brightness(assignment.brightness / 100);
+      imageRef.current.brightness(assignment.brightness! / 100);
     }
     
-    if (assignment.contrast !== undefined && assignment.contrast !== 0) {
+    if (shouldApplyContrast) {
       // Contrast filter expects values from -100 to 100
-      imageRef.current.contrast(assignment.contrast);
+      imageRef.current.contrast(assignment.contrast!);
     }
     
-    if (assignment.saturation !== undefined && assignment.saturation !== 0) {
+    if (shouldApplySaturation) {
       // HSL saturation expects values from -2 to 10 (we'll map -100 to 100 to -2 to 2)
-      imageRef.current.saturation(assignment.saturation / 50);
+      imageRef.current.saturation(assignment.saturation! / 50);
     }
+    
+    if (shouldApplyHue) {
+      // HSL hue expects values from 0 to 359 (degrees)
+      imageRef.current.hue(assignment.hue!);
+    }
+    
+    // Apply temperature and tint (only pass values if enabled)
+    const tempValue = shouldApplyTemperature ? (assignment.temperature ?? 0) : 0;
+    const tintValue = shouldApplyTint ? (assignment.tint ?? 0) : 0;
+    applyTemperatureTintAttributes(imageRef.current, tempValue, tintValue);
     
     imageRef.current.cache();
     imageRef.current.getLayer()?.batchDraw();
-  }, [assignment.brightness, assignment.contrast, assignment.saturation]);
+  }, [
+    assignment.brightness,
+    assignment.contrast,
+    assignment.saturation,
+    assignment.hue,
+    assignment.temperature,
+    assignment.tint,
+    assignment.filtersEnabled,
+    assignment.brightnessEnabled,
+    assignment.contrastEnabled,
+    assignment.saturationEnabled,
+    assignment.hueEnabled,
+    assignment.temperatureEnabled,
+    assignment.tintEnabled,
+  ]);
 
   // Convert slot percentage coordinates to canvas pixel coordinates
   const slotX = useMemo(() => (slot.x / 100) * CANVAS_WIDTH, [slot.x]);
