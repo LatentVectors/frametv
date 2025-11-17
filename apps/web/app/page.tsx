@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
@@ -10,55 +10,56 @@ import {
   PREVIEW_MIN_HEIGHT,
   PREVIEW_MAX_WIDTH_PERCENT,
 } from "@/lib/config";
-import { Template } from "@/types";
+import { Template, ImageAssignment } from "@/types";
 import { getDefaultTemplate } from "@/lib/templates";
 import TemplateSelector from "@/components/TemplateSelector";
-import ExportButton from "@/components/ExportButton";
 import SaveButton from "@/components/SaveButton";
 import type { CanvasEditorHandle } from "@/components/CanvasEditor";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { SidebarProvider, useSidebar } from "@/contexts/SidebarContext";
+import { ImageSidebar } from "@/components/ImageSidebar";
+import { useResizableSidebar } from "@/hooks/useResizableSidebar";
 
 // Dynamically import CanvasEditor to avoid SSR issues with Konva
 const CanvasEditor = dynamic(() => import("@/components/CanvasEditor"), {
   ssr: false,
 });
 
-export default function Home() {
+function HomeContent() {
   const canvasEditorHandleRef = useRef<CanvasEditorHandle | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<Template>(
     getDefaultTemplate()
   );
-  const [isExporting, setIsExporting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [imageAssignments, setImageAssignments] = useState<
+    Map<string, ImageAssignment>
+  >(new Map());
   const { toast } = useToast();
+
+  // Sidebar state from context
+  const { sidebarWidth, setSidebarWidth } = useSidebar();
+
+  // Resizable sidebar hook
+  const { width, isResizing, handleMouseDown } = useResizableSidebar({
+    defaultWidth: sidebarWidth,
+    minWidth: 200,
+    maxWidth: 600,
+    onWidthChange: setSidebarWidth,
+  });
 
   const handleTemplateChange = (template: Template) => {
     setSelectedTemplate(template);
-    // Clear image assignments when template changes (will be implemented in later tasks)
+    // Clear image assignments when template changes
+    setImageAssignments(new Map());
   };
 
-  const handleExportReady = (handle: CanvasEditorHandle) => {
+  const handleExportReady = useCallback((handle: CanvasEditorHandle) => {
     canvasEditorHandleRef.current = handle;
-    setIsExporting(handle.isExporting);
-  };
-
-  const handleExport = async () => {
-    if (!canvasEditorHandleRef.current || isExporting) return;
-
-    setIsExporting(true);
-    try {
-      await canvasEditorHandleRef.current.exportCanvas();
-    } finally {
-      // Update exporting state from handle
-      if (canvasEditorHandleRef.current) {
-        setIsExporting(canvasEditorHandleRef.current.isExporting);
-      }
-    }
-  };
+  }, []);
 
   const handleSave = async () => {
-    if (!canvasEditorHandleRef.current || isSaving || isExporting) return;
+    if (!canvasEditorHandleRef.current || isSaving) return;
 
     setIsSaving(true);
     try {
@@ -89,7 +90,10 @@ export default function Home() {
     } catch (error) {
       toast({
         title: "Save error",
-        description: error instanceof Error ? error.message : "Failed to save image. Please try again.",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Failed to save image. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -97,62 +101,83 @@ export default function Home() {
     }
   };
 
-  // Sync exporting state from handle
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (canvasEditorHandleRef.current) {
-        setIsExporting(canvasEditorHandleRef.current.isExporting);
-      }
-    }, 100);
-    return () => clearInterval(interval);
-  }, []);
+  // Calculate if all slots are filled
+  const allSlotsFilled =
+    imageAssignments.size === selectedTemplate.slots.length &&
+    imageAssignments.size > 0;
 
   return (
-    <main className="flex min-h-screen flex-col bg-white">
-      {/* Top bar with Template Selector (left) and Export Button (right) */}
+    <main className="flex h-screen flex-col bg-white">
+      {/* Top bar - full width */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Link href="/gallery">
+            <Button variant="ghost" className="text-sm">
+              Gallery
+            </Button>
+          </Link>
+          <Link href="/settings">
+            <Button variant="ghost" className="text-sm">
+              Settings
+            </Button>
+          </Link>
+        </div>
+        <div className="flex items-center gap-2">
           <TemplateSelector
             selectedTemplate={selectedTemplate}
             onTemplateChange={handleTemplateChange}
           />
-          <div className="flex items-center gap-2 ml-4">
-            <Link href="/gallery">
-              <Button variant="ghost" className="text-sm">Gallery</Button>
-            </Link>
-            <Link href="/settings">
-              <Button variant="ghost" className="text-sm">Settings</Button>
-            </Link>
-          </div>
-        </div>
-        <div className="flex items-center">
-          <ExportButton onExport={handleExport} disabled={isExporting || isSaving} />
-          <SaveButton onSave={handleSave} disabled={isSaving || isExporting} />
+          <SaveButton
+            onSave={handleSave}
+            disabled={isSaving || !allSlotsFilled}
+            isSaving={isSaving}
+          />
         </div>
       </div>
 
-      {/* Canvas area - centered and responsive */}
-      <div className="flex-1 flex items-center justify-center p-6">
-        {/* Canvas container with 16:9 aspect ratio */}
-        <div
-          className="relative bg-white border border-gray-200 shadow-sm"
-          style={{
-            width: "100%",
-            maxWidth: `${PREVIEW_MAX_WIDTH_PERCENT}vw`,
-            aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`,
-            minWidth: `${PREVIEW_MIN_WIDTH}px`,
-            minHeight: `${PREVIEW_MIN_HEIGHT}px`,
-          }}
-        >
-          {/* Canvas container div for react-konva Stage */}
-          <div id="canvas-container" className="w-full h-full">
-            <CanvasEditor 
-              template={selectedTemplate} 
-              onExportReady={handleExportReady}
-            />
+      {/* Main content area - flexbox horizontal layout */}
+      <div className="flex-1 flex flex-row overflow-hidden">
+        {/* Left sidebar */}
+        <ImageSidebar
+          width={width}
+          isResizing={isResizing}
+          onResizeStart={handleMouseDown}
+        />
+
+        {/* Canvas area - centered and responsive */}
+        <div className="flex-1 flex items-center justify-center p-6 overflow-hidden">
+          {/* Canvas container with 16:9 aspect ratio */}
+          <div
+            className="relative bg-white border border-gray-200 shadow-sm"
+            style={{
+              width: "100%",
+              maxWidth: `min(${PREVIEW_MAX_WIDTH_PERCENT}vw, calc(100vw - ${width}px - 100px))`,
+              aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`,
+              minWidth: `${PREVIEW_MIN_WIDTH}px`,
+              minHeight: `${PREVIEW_MIN_HEIGHT}px`,
+              maxHeight: "calc(100vh - 120px)", // Ensure canvas doesn't exceed viewport
+            }}
+          >
+            {/* Canvas container div for react-konva Stage */}
+            <div id="canvas-container" className="w-full h-full">
+              <CanvasEditor
+                template={selectedTemplate}
+                onExportReady={handleExportReady}
+                imageAssignments={imageAssignments}
+                setImageAssignments={setImageAssignments}
+              />
+            </div>
           </div>
         </div>
       </div>
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <SidebarProvider>
+      <HomeContent />
+    </SidebarProvider>
   );
 }

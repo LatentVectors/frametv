@@ -24,8 +24,6 @@ import {
   isValidImageFile,
   createImageUrl,
   loadImageFromUrl,
-  generateExportFilename,
-  downloadDataUrl,
 } from "@/lib/imageUtils";
 import { useToast } from "@/hooks/use-toast";
 import Slot from "./Slot";
@@ -34,16 +32,18 @@ import ImageLayer from "./ImageLayer";
 interface CanvasEditorProps {
   template: Template;
   onExportReady?: (handle: CanvasEditorHandle) => void;
+  imageAssignments: Map<string, ImageAssignment>;
+  setImageAssignments: React.Dispatch<
+    React.SetStateAction<Map<string, ImageAssignment>>
+  >;
 }
 
 export interface CanvasEditorHandle {
-  exportCanvas: () => Promise<void>;
   getCanvasDataUrl: () => Promise<string>;
-  isExporting: boolean;
 }
 
 const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
-  ({ template, onExportReady }, ref) => {
+  ({ template, onExportReady, imageAssignments, setImageAssignments }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const stageRef = useRef<any>(null);
     const layerRef = useRef<any>(null);
@@ -54,11 +54,6 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
     });
     const [hoveredSlotId, setHoveredSlotId] = useState<string | null>(null);
     const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
-    const [isExporting, setIsExporting] = useState(false);
-    // Image assignments: Map<slotId, ImageAssignment>
-    const [imageAssignments, setImageAssignments] = useState<
-      Map<string, ImageAssignment>
-    >(new Map());
 
     useEffect(() => {
       const updateCanvasSize = () => {
@@ -68,6 +63,14 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
         const containerWidth = container.clientWidth;
         const containerHeight = container.clientHeight;
 
+        // Calculate topbar height and padding (from spec: topbar is ~72px, padding is 48px total)
+        const topBarHeight = 72; // Approximate topbar height
+        const verticalPadding = 48; // Total vertical padding (24px top + 24px bottom)
+
+        // Calculate max canvas height to never exceed viewport
+        const maxCanvasHeight =
+          window.innerHeight - topBarHeight - verticalPadding;
+
         // Calculate max width based on viewport (90% max)
         const maxWidth = (window.innerWidth * PREVIEW_MAX_WIDTH_PERCENT) / 100;
 
@@ -75,12 +78,24 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
         let width = Math.min(containerWidth, maxWidth);
         let height = width * (CANVAS_HEIGHT / CANVAS_WIDTH);
 
+        // Critical: Ensure height never exceeds maxCanvasHeight
+        if (height > maxCanvasHeight) {
+          height = maxCanvasHeight;
+          width = height * (CANVAS_WIDTH / CANVAS_HEIGHT);
+        }
+
         // Ensure minimum dimensions
         if (width < PREVIEW_MIN_WIDTH) {
           width = PREVIEW_MIN_WIDTH;
           height = PREVIEW_MIN_HEIGHT;
         } else if (height < PREVIEW_MIN_HEIGHT) {
           height = PREVIEW_MIN_HEIGHT;
+          width = height * (CANVAS_WIDTH / CANVAS_HEIGHT);
+        }
+
+        // Final check: ensure height doesn't exceed maxCanvasHeight
+        if (height > maxCanvasHeight) {
+          height = maxCanvasHeight;
           width = height * (CANVAS_WIDTH / CANVAS_HEIGHT);
         }
 
@@ -95,16 +110,21 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       };
     }, []);
 
-    // Reset hovered slot, selected slot, and clear image assignments when template changes
+    // Reset hovered slot and selected slot when template changes
     useEffect(() => {
       setHoveredSlotId(null);
       setSelectedSlotId(null);
-      setImageAssignments(new Map());
     }, [template.id]);
 
     // Calculate scale factor to convert from canvas internal coordinates (3840×2160) to preview size
-    const scaleX = useMemo(() => canvasSize.width / CANVAS_WIDTH, [canvasSize.width]);
-    const scaleY = useMemo(() => canvasSize.height / CANVAS_HEIGHT, [canvasSize.height]);
+    const scaleX = useMemo(
+      () => canvasSize.width / CANVAS_WIDTH,
+      [canvasSize.width]
+    );
+    const scaleY = useMemo(
+      () => canvasSize.height / CANVAS_HEIGHT,
+      [canvasSize.height]
+    );
 
     /**
      * Find which slot contains the given canvas coordinates
@@ -112,28 +132,28 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
      * @param canvasY - Y coordinate in canvas space (0 to CANVAS_HEIGHT)
      * @returns Slot ID if found, null otherwise
      */
-    const findSlotAtCanvasCoordinates = useCallback((
-      canvasX: number,
-      canvasY: number
-    ): string | null => {
-      // Convert canvas coordinates to percentage
-      const percentX = (canvasX / CANVAS_WIDTH) * 100;
-      const percentY = (canvasY / CANVAS_HEIGHT) * 100;
+    const findSlotAtCanvasCoordinates = useCallback(
+      (canvasX: number, canvasY: number): string | null => {
+        // Convert canvas coordinates to percentage
+        const percentX = (canvasX / CANVAS_WIDTH) * 100;
+        const percentY = (canvasY / CANVAS_HEIGHT) * 100;
 
-      // Find slot that contains these percentage coordinates
-      for (const slot of template.slots) {
-        if (
-          percentX >= slot.x &&
-          percentX <= slot.x + slot.width &&
-          percentY >= slot.y &&
-          percentY <= slot.y + slot.height
-        ) {
-          return slot.id;
+        // Find slot that contains these percentage coordinates
+        for (const slot of template.slots) {
+          if (
+            percentX >= slot.x &&
+            percentX <= slot.x + slot.width &&
+            percentY >= slot.y &&
+            percentY <= slot.y + slot.height
+          ) {
+            return slot.id;
+          }
         }
-      }
 
-      return null;
-    }, [template]);
+        return null;
+      },
+      [template]
+    );
 
     /**
      * Handle drag over event - prevent default to allow drop
@@ -181,99 +201,191 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
     };
 
     /**
-     * Handle drop event - assign image to slot if valid
+     * Handle filesystem file drop
      */
-    const handleDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
+    const handleFileSystemDrop = useCallback(
+      async (
+        file: File,
+        slotId: string,
+        slot: { width: number; height: number }
+      ) => {
+        try {
+          // Create object URL for the image
+          const imageUrl = createImageUrl(file);
 
-      // Get dropped files
-      const files = Array.from(e.dataTransfer.files);
-      if (files.length === 0) return;
+          // Load the image from the URL
+          const image = await loadImageFromUrl(imageUrl);
 
-      // For MVP, only handle the first file
-      const file = files[0];
+          // Calculate initial transform (center and scale to fill)
+          const transform = calculateInitialTransform(image, slot);
 
-      // Validate file type
-      if (!isValidImageFile(file)) {
-        toast({
-          title: "Invalid file type",
-          description: "Please drop JPEG or PNG images.",
-          variant: "destructive",
-        });
-        return;
-      }
+          // Create image assignment with original dimensions for preview scaling
+          const assignment: ImageAssignment = {
+            slotId,
+            imageUrl,
+            x: transform.x,
+            y: transform.y,
+            scaleX: transform.scaleX,
+            scaleY: transform.scaleY,
+            originalWidth: image.width,
+            originalHeight: image.height,
+          };
 
-      // Get drop coordinates relative to the container
-      if (!containerRef.current) return;
+          // Update image assignments
+          setImageAssignments((prev) => {
+            const newMap = new Map(prev);
+            newMap.set(slotId, assignment);
+            return newMap;
+          });
+        } catch (error) {
+          toast({
+            title: "Image loading error",
+            description: "Failed to load the image. Please try again.",
+            variant: "destructive",
+          });
+        }
+      },
+      [toast, setImageAssignments]
+    );
 
-      const container = containerRef.current;
-      const containerRect = container.getBoundingClientRect();
+    /**
+     * Handle sidebar image drop
+     * Loads image from the file path using API
+     */
+    const handleSidebarImageDrop = useCallback(
+      async (
+        imagePath: string,
+        slotId: string,
+        slot: { width: number; height: number }
+      ) => {
+        try {
+          // Fetch the image from the gallery API endpoint
+          const response = await fetch(
+            `/api/gallery/image?path=${encodeURIComponent(imagePath)}`
+          );
+          if (!response.ok) {
+            throw new Error("Failed to load image from path");
+          }
 
-      // Calculate drop coordinates relative to container
-      const dropX = e.clientX - containerRect.left;
-      const dropY = e.clientY - containerRect.top;
+          const blob = await response.blob();
+          const imageUrl = URL.createObjectURL(blob);
 
-      // Convert screen coordinates to canvas coordinates
-      // Stage is scaled, so we need to convert back to internal canvas coordinates
-      const canvasX = dropX / scaleX;
-      const canvasY = dropY / scaleY;
+          // Load the image from the URL
+          const image = await loadImageFromUrl(imageUrl);
 
-      // Find which slot contains the drop coordinates
-      const slotId = findSlotAtCanvasCoordinates(canvasX, canvasY);
+          // Calculate initial transform (center and scale to fill)
+          const transform = calculateInitialTransform(image, slot);
 
-      // If drop is outside any slot, ignore silently (as per requirement)
-      if (!slotId) {
-        return;
-      }
+          // Create image assignment with original dimensions for preview scaling
+          const assignment: ImageAssignment = {
+            slotId,
+            imageUrl,
+            x: transform.x,
+            y: transform.y,
+            scaleX: transform.scaleX,
+            scaleY: transform.scaleY,
+            originalWidth: image.width,
+            originalHeight: image.height,
+          };
 
-      // Find the slot object
-      const slot = template.slots.find((s) => s.id === slotId);
-      if (!slot) {
-        return;
-      }
+          // Update image assignments
+          setImageAssignments((prev) => {
+            const newMap = new Map(prev);
+            newMap.set(slotId, assignment);
+            return newMap;
+          });
+        } catch (error) {
+          toast({
+            title: "Image loading error",
+            description:
+              "Failed to load the image from sidebar. Please try again.",
+            variant: "destructive",
+          });
+        }
+      },
+      [toast, setImageAssignments]
+    );
 
-      try {
-        // Create object URL for the image
-        const imageUrl = createImageUrl(file);
+    /**
+     * Handle drop event - assign image to slot if valid
+     * Supports both filesystem drops and sidebar image drops
+     */
+    const handleDrop = useCallback(
+      async (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
 
-        // Load the image from the URL
-        const image = await loadImageFromUrl(imageUrl);
+        // Get drop coordinates relative to the container
+        if (!containerRef.current) return;
 
-        // Calculate initial transform (center and scale to fill)
-        const transform = calculateInitialTransform(image, slot);
+        const container = containerRef.current;
+        const containerRect = container.getBoundingClientRect();
 
-        // Create image assignment with original dimensions for preview scaling
-        const assignment: ImageAssignment = {
-          slotId,
-          imageUrl,
-          x: transform.x,
-          y: transform.y,
-          scaleX: transform.scaleX,
-          scaleY: transform.scaleY,
-          originalWidth: image.width,
-          originalHeight: image.height,
-        };
+        // Calculate drop coordinates relative to container
+        const dropX = e.clientX - containerRect.left;
+        const dropY = e.clientY - containerRect.top;
 
-        // Update image assignments
-        setImageAssignments((prev) => {
-          const newMap = new Map(prev);
-          newMap.set(slotId, assignment);
-          return newMap;
-        });
-      } catch (error) {
-        toast({
-          title: "Image loading error",
-          description: "Failed to load the image. Please try again.",
-          variant: "destructive",
-        });
-      }
-    }, [template, scaleX, scaleY, toast, findSlotAtCanvasCoordinates]);
+        // Convert screen coordinates to canvas coordinates
+        // Stage is scaled, so we need to convert back to internal canvas coordinates
+        const canvasX = dropX / scaleX;
+        const canvasY = dropY / scaleY;
+
+        // Find which slot contains the drop coordinates
+        const slotId = findSlotAtCanvasCoordinates(canvasX, canvasY);
+
+        // If drop is outside any slot, ignore silently (as per requirement)
+        if (!slotId) {
+          return;
+        }
+
+        // Find the slot object
+        const slot = template.slots.find((s) => s.id === slotId);
+        if (!slot) {
+          return;
+        }
+
+        // Check if this is a sidebar image drop (custom type set by ImageThumbnail)
+        const sidebarImagePath = e.dataTransfer.getData("image/sidebar");
+
+        if (sidebarImagePath) {
+          // Handle sidebar image drop
+          await handleSidebarImageDrop(sidebarImagePath, slotId, slot);
+        } else {
+          // Handle filesystem drop
+          const files = Array.from(e.dataTransfer.files);
+          if (files.length === 0) return;
+
+          // For MVP, only handle the first file
+          const file = files[0];
+
+          // Validate file type
+          if (!isValidImageFile(file)) {
+            toast({
+              title: "Invalid file type",
+              description: "Please drop JPEG or PNG images.",
+              variant: "destructive",
+            });
+            return;
+          }
+
+          await handleFileSystemDrop(file, slotId, slot);
+        }
+      },
+      [
+        template,
+        scaleX,
+        scaleY,
+        toast,
+        findSlotAtCanvasCoordinates,
+        handleFileSystemDrop,
+        handleSidebarImageDrop,
+      ]
+    );
 
     /**
      * Generate canvas as JPEG data URL at full resolution (3840×2160)
      */
-    const generateCanvasDataUrl = async (): Promise<string> => {
+    const generateCanvasDataUrl = useCallback(async (): Promise<string> => {
       // Create a temporary full-resolution stage
       const exportStage = new Konva.Stage({
         container: document.createElement("div"),
@@ -359,47 +471,14 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       exportStage.destroy();
 
       return dataUrl;
-    };
+    }, [imageAssignments, template]);
 
     /**
      * Get canvas as JPEG data URL at full resolution (3840×2160)
      */
-    const getCanvasDataUrl = async (): Promise<string> => {
-      if (isExporting) {
-        throw new Error("Export already in progress");
-      }
+    const getCanvasDataUrl = useCallback(async (): Promise<string> => {
       return await generateCanvasDataUrl();
-    };
-
-    /**
-     * Export canvas as JPEG at full resolution (3840×2160)
-     */
-    const exportCanvas = async (): Promise<void> => {
-      if (isExporting) return;
-
-      setIsExporting(true);
-
-      try {
-        const dataUrl = await generateCanvasDataUrl();
-
-        // Generate filename and download
-        const filename = generateExportFilename();
-        downloadDataUrl(dataUrl, filename);
-
-        toast({
-          title: "Export successful",
-          description: `Image exported as ${filename}`,
-        });
-      } catch (error) {
-        toast({
-          title: "Export error",
-          description: "Failed to export image. Please try again.",
-          variant: "destructive",
-        });
-      } finally {
-        setIsExporting(false);
-      }
-    };
+    }, [generateCanvasDataUrl]);
 
     // Optimize event handlers with useCallback
     const handleStageClick = useCallback((e: any) => {
@@ -419,53 +498,62 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       setHoveredSlotId(null);
     }, []);
 
-    const handleSlotClick = useCallback((slotId: string) => {
-      return (e: any) => {
-        e.cancelBubble = true;
-        // Deselect if clicking on empty slot (slot without image)
-        if (!imageAssignments.has(slotId)) {
-          setSelectedSlotId(null);
-        }
-      };
-    }, [imageAssignments]);
+    const handleSlotClick = useCallback(
+      (slotId: string) => {
+        return (e: any) => {
+          e.cancelBubble = true;
+          // Deselect if clicking on empty slot (slot without image)
+          if (!imageAssignments.has(slotId)) {
+            setSelectedSlotId(null);
+          }
+        };
+      },
+      [imageAssignments]
+    );
 
     const handleImageSelect = useCallback((slotId: string) => {
       setSelectedSlotId(slotId);
     }, []);
 
-    const handleTransformUpdate = useCallback((slotId: string) => {
-      return (x: number, y: number) => {
-        setImageAssignments((prev) => {
-          const newMap = new Map(prev);
-          const existingAssignment = newMap.get(slotId);
-          if (existingAssignment) {
-            newMap.set(slotId, {
-              ...existingAssignment,
-              x,
-              y,
-            });
-          }
-          return newMap;
-        });
-      };
-    }, []);
+    const handleTransformUpdate = useCallback(
+      (slotId: string) => {
+        return (x: number, y: number) => {
+          setImageAssignments((prev) => {
+            const newMap = new Map(prev);
+            const existingAssignment = newMap.get(slotId);
+            if (existingAssignment) {
+              newMap.set(slotId, {
+                ...existingAssignment,
+                x,
+                y,
+              });
+            }
+            return newMap;
+          });
+        };
+      },
+      [setImageAssignments]
+    );
 
-    const handleScaleUpdate = useCallback((slotId: string) => {
-      return (scaleX: number, scaleY: number) => {
-        setImageAssignments((prev) => {
-          const newMap = new Map(prev);
-          const existingAssignment = newMap.get(slotId);
-          if (existingAssignment) {
-            newMap.set(slotId, {
-              ...existingAssignment,
-              scaleX,
-              scaleY,
-            });
-          }
-          return newMap;
-        });
-      };
-    }, []);
+    const handleScaleUpdate = useCallback(
+      (slotId: string) => {
+        return (scaleX: number, scaleY: number) => {
+          setImageAssignments((prev) => {
+            const newMap = new Map(prev);
+            const existingAssignment = newMap.get(slotId);
+            if (existingAssignment) {
+              newMap.set(slotId, {
+                ...existingAssignment,
+                scaleX,
+                scaleY,
+              });
+            }
+            return newMap;
+          });
+        };
+      },
+      [setImageAssignments]
+    );
 
     // Memoize image assignments array to prevent unnecessary re-renders
     const imageAssignmentsArray = useMemo(
@@ -473,22 +561,24 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       [imageAssignments]
     );
 
-    // Expose export function and state via ref
-    useImperativeHandle(ref, () => ({
-      exportCanvas,
-      getCanvasDataUrl,
-      isExporting,
-    }));
+    // Expose canvas data URL function via ref
+    useImperativeHandle(
+      ref,
+      () => ({
+        getCanvasDataUrl,
+      }),
+      [getCanvasDataUrl]
+    );
 
     // Also expose via callback for dynamic import compatibility
-    const handleRef = useRef({ exportCanvas, getCanvasDataUrl, isExporting });
-    handleRef.current = { exportCanvas, getCanvasDataUrl, isExporting };
-    
+    const handleRef = useRef({ getCanvasDataUrl });
+    handleRef.current = { getCanvasDataUrl };
+
     useEffect(() => {
       if (onExportReady) {
         onExportReady(handleRef.current);
       }
-    }, [onExportReady, isExporting]);
+    }, [onExportReady, getCanvasDataUrl]);
 
     return (
       <div

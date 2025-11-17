@@ -6,9 +6,14 @@ import { Loader2 } from "lucide-react";
 interface SaveButtonProps {
   onSave: () => void;
   disabled?: boolean;
+  isSaving?: boolean;
 }
 
-export default function SaveButton({ onSave, disabled = false }: SaveButtonProps) {
+export default function SaveButton({
+  onSave,
+  disabled = false,
+  isSaving = false,
+}: SaveButtonProps) {
   return (
     <Button
       onClick={onSave}
@@ -16,15 +21,14 @@ export default function SaveButton({ onSave, disabled = false }: SaveButtonProps
       variant="default"
       className="min-w-[100px] ml-2"
     >
-      {disabled ? (
+      {isSaving ? (
         <>
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           Saving...
         </>
       ) : (
-        "Save Image"
+        "Save"
       )}
     </Button>
   );
 }
-
