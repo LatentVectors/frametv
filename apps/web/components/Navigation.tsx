@@ -44,6 +44,17 @@ export function Navigation({ children }: NavigationProps) {
             Gallery
           </button>
         </Link>
+        <Link href="/tv">
+          <button
+            className={`px-3 py-2 text-sm rounded-md transition-colors ${
+              isActive("/tv")
+                ? "bg-secondary text-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+            }`}
+          >
+            TV
+          </button>
+        </Link>
         <Link href="/settings">
           <button
             className={`px-3 py-2 text-sm rounded-md transition-colors ${

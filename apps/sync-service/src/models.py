@@ -9,9 +9,11 @@ from pydantic import BaseModel
 class SyncRequest(BaseModel):
     """Request model for syncing images to TV."""
 
-    image_paths: List[str]  # Full file paths to images
+    image_paths: List[str]  # Full file paths to images (legacy)
     ip_address: str
     port: int = 8002
+    mode: str = "add"  # "add" or "reset"
+    gallery_image_ids: List[int] = []  # Gallery image IDs to sync
 
 
 class FailedImage(BaseModel):

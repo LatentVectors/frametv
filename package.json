@@ -1,0 +1,30 @@
+{
+  "name": "frametv-v4",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "npm@10.9.3",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:web": "turbo run dev --filter=web",
+    "dev:sync": "turbo run dev --filter=sync-service",
+    "dev:database": "turbo run dev --filter=database-service",
+    "build": "turbo run build",
+    "start": "turbo run start",
+    "lint": "turbo run lint",
+    "install:all": "bash scripts/install.sh",
+    "clean": "bash scripts/clean.sh",
+    "clean:all": "npm run clean && npm run clean:lockfiles",
+    "clean:lockfiles": "find . -name 'package-lock.json' -not -path '*/node_modules/*' -delete && find . -name 'yarn.lock' -not -path '*/node_modules/*' -delete && find . -name 'pnpm-lock.yaml' -not -path '*/node_modules/*' -delete"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "wait-on": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

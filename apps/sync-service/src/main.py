@@ -22,6 +22,9 @@ if os.getenv("MOCK_TV", "").lower() == "true":
     )
 
 from tv_sync import sync_images_to_tv  # noqa: E402
+from tv_refresh import refresh_tv_state  # noqa: E402
+from tv_sync_smart import sync_add_mode, sync_reset_mode  # noqa: E402
+from database_client import DatabaseClient  # noqa: E402
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -63,22 +66,44 @@ async def sync(request: SyncRequest):
     """
     Sync selected images to TV.
 
-    This endpoint:
-    1. Connects to the TV using saved token
-    2. Turns on Art Mode
-    3. Uploads each image with matte='none'
+    Supports two modes:
+    - "add": Upload only new gallery images, preserve all existing TV content
+    - "reset": Remove unselected gallery images, upload new ones, preserve manual uploads
+
+    Uses gallery_image_ids if provided, otherwise falls back to image_paths (legacy).
     """
     try:
-        logger.info(
-            f"Sync request for {len(request.image_paths)} images "
-            f"to {request.ip_address}:{request.port}"
-        )
-
-        success, synced, failed_dicts, total, successful = sync_images_to_tv(
-            request.image_paths,
-            request.ip_address,
-            request.port,
-        )
+        # Use smart sync if gallery_image_ids provided
+        if request.gallery_image_ids:
+            logger.info(
+                f"Smart sync ({request.mode} mode) for {len(request.gallery_image_ids)} "
+                f"gallery images to {request.ip_address}:{request.port}"
+            )
+            
+            if request.mode == "reset":
+                success, synced, failed_dicts, total, successful = await sync_reset_mode(
+                    request.gallery_image_ids,
+                    request.ip_address,
+                    request.port,
+                )
+            else:  # default to "add"
+                success, synced, failed_dicts, total, successful = await sync_add_mode(
+                    request.gallery_image_ids,
+                    request.ip_address,
+                    request.port,
+                )
+        else:
+            # Legacy mode using image_paths
+            logger.info(
+                f"Legacy sync for {len(request.image_paths)} images "
+                f"to {request.ip_address}:{request.port}"
+            )
+            
+            success, synced, failed_dicts, total, successful = await sync_images_to_tv(
+                request.image_paths,
+                request.ip_address,
+                request.port,
+            )
 
         # Convert failed dicts to FailedImage models
         failed = [
@@ -95,6 +120,36 @@ async def sync(request: SyncRequest):
     except Exception as e:
         logger.error(f"Error in sync endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Sync error: {str(e)}")
+
+
+@app.post("/tv-content/refresh")
+async def refresh_tv():
+    """
+    Refresh TV state - reconcile database with TV's actual state.
+    """
+    try:
+        # Get TV settings from database
+        db_client = DatabaseClient()
+        try:
+            settings = await db_client.get_settings()
+            ip_address = settings.get("tv_ip_address")
+            port = settings.get("tv_port", 8002)
+            
+            if not ip_address:
+                raise HTTPException(
+                    status_code=400,
+                    detail="TV IP address not configured. Please set it in Settings."
+                )
+        finally:
+            await db_client.close()
+        
+        result = await refresh_tv_state(ip_address, port)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in refresh TV state endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Refresh error: {str(e)}")
 
 
 if __name__ == "__main__":

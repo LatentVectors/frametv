@@ -114,7 +114,7 @@ function ImageLayer({
     const shouldApplyTint = filtersEnabled && tintEnabled && 
       assignment.tint !== undefined && assignment.tint !== 0;
     const temperatureTintFilter =
-      (Konva.Filters as Record<string, Konva.Filter>).TemperatureTint;
+      (Konva.Filters as Record<string, typeof Konva.Filters[keyof typeof Konva.Filters]>).TemperatureTint;
     if ((shouldApplyTemperature || shouldApplyTint) && temperatureTintFilter) {
       filters.push(temperatureTintFilter);
     }

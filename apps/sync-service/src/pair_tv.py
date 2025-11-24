@@ -156,7 +156,7 @@ async def async_main(ip: Optional[str], port: int):
 def main(
     ip: Optional[str] = typer.Option(None, "--ip", "-i", help="TV IP address"),
     port: int = typer.Option(
-        8080, "--port", "-p", help="TV port for pairing (default: 8080)"
+        8001, "--port", "-p", help="TV port for pairing (default: 8080)"
     ),
 ):
     """Pair with Samsung Frame TV and save authentication token."""

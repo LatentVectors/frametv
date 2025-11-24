@@ -1,0 +1,21 @@
+[project]
+name = "database-service"
+version = "1.0.0"
+description = "FastAPI database service for FrameTV with SQLModel ORM"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "sqlmodel>=0.0.14",
+    "alembic>=1.13.0",
+    "pydantic>=2.0.0",
+    "pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.4.0", "httpx>=0.24.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+

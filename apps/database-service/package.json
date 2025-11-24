@@ -1,0 +1,10 @@
+{
+  "name": "database-service",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "DATABASE_SERVICE_PORT=8001 .venv/bin/python src/main.py",
+    "start": "DATABASE_SERVICE_PORT=8001 .venv/bin/python src/main.py"
+  }
+}
+

@@ -1,0 +1,10 @@
+{
+  "name": "sync-service",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": ".venv/bin/python src/main.py",
+    "start": ".venv/bin/python src/main.py"
+  }
+}
+

@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
       contentType = "image/jpeg";
     }
 
-    return new NextResponse(processedBuffer, {
+    return new NextResponse(processedBuffer as BodyInit, {
       headers: {
         "Content-Type": contentType,
         "Cache-Control": "public, max-age=31536000, immutable",

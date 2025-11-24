@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import Link from "next/link";
-import { Loader2 } from "lucide-react";
+import { Loader2, RefreshCw, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Navigation } from "@/components/Navigation";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { SyncModal } from "@/components/SyncModal";
+import { syncApi, tvContentApi } from "@/lib/api";
 
 interface GalleryImage {
+  id?: number;
   filename: string;
   filepath: string;
   createdAt: string;
@@ -23,16 +25,11 @@ interface GalleryResponse {
   hasMore: boolean;
 }
 
-interface SyncResponse {
-  success: boolean;
-  synced: string[];
-  failed: Array<{
-    filename: string;
-    error: string;
-  }>;
-  total?: number;
-  successful?: number;
-  error?: string;
+interface TVContentMapping {
+  id?: number;
+  gallery_image_id?: number;
+  tv_content_id: string;
+  sync_status: "synced" | "pending" | "failed" | "manual";
 }
 
 export default function GalleryPage() {
@@ -42,9 +39,13 @@ export default function GalleryPage() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
+  const [selectedImages, setSelectedImages] = useState<Set<number>>(new Set());
   const [syncing, setSyncing] = useState(false);
-  const [tvConfigured, setTvConfigured] = useState<boolean | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
+  const [tvMappings, setTvMappings] = useState<Map<number, TVContentMapping>>(
+    new Map()
+  );
   const observerTarget = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -83,26 +84,28 @@ export default function GalleryPage() {
     []
   );
 
+  const loadTVMappings = useCallback(async () => {
+    try {
+      const response = (await tvContentApi.list(1, 10000)) as {
+        items?: TVContentMapping[];
+      };
+      const mappings = response.items || [];
+      const mappingMap = new Map<number, TVContentMapping>();
+      for (const mapping of mappings) {
+        if (mapping.gallery_image_id) {
+          mappingMap.set(mapping.gallery_image_id, mapping);
+        }
+      }
+      setTvMappings(mappingMap);
+    } catch (error) {
+      console.error("Failed to load TV mappings:", error);
+    }
+  }, []);
+
   useEffect(() => {
     loadImages(1);
-  }, [loadImages]);
-
-  // Check TV configuration status
-  useEffect(() => {
-    const checkTVConfiguration = async () => {
-      try {
-        const response = await fetch("/api/settings/check");
-        if (response.ok) {
-          const data = await response.json();
-          setTvConfigured(data.isConfigured);
-        }
-      } catch (error) {
-        console.error("Error checking TV configuration:", error);
-        setTvConfigured(false);
-      }
-    };
-    checkTVConfiguration();
-  }, []);
+    loadTVMappings();
+  }, [loadImages, loadTVMappings]);
 
   // Infinite scroll observer
   useEffect(() => {
@@ -129,106 +132,98 @@ export default function GalleryPage() {
 
   // Convert filepath to a URL that can be displayed
   const getImageUrl = (filepath: string) => {
-    // For Next.js, we'll need to serve images via an API route
-    // For now, use a relative path that will be handled by an image serving route
     const filename = filepath.split(/[/\\]/).pop();
     return `/api/gallery/image?filename=${encodeURIComponent(filename || "")}`;
   };
 
-  const toggleImageSelection = (filename: string) => {
+  const toggleImageSelection = (imageId: number) => {
     setSelectedImages((prev) => {
       const newSet = new Set(prev);
-      if (newSet.has(filename)) {
-        newSet.delete(filename);
+      if (newSet.has(imageId)) {
+        newSet.delete(imageId);
       } else {
-        newSet.add(filename);
+        newSet.add(imageId);
       }
       return newSet;
     });
   };
 
-  const handleSync = async () => {
-    if (selectedImages.size === 0) {
+  const handleRefreshTVState = async () => {
+    try {
+      setRefreshing(true);
+      const result = await syncApi.refreshTVState();
+
       toast({
-        title: "No images selected",
-        description: "Please select at least one image to sync",
+        title: "TV State Refreshed",
+        description: `Found ${result.total_on_tv} images on TV (${result.synced_via_app} synced via app, ${result.manual_uploads} manual)`,
+      });
+
+      // Reload TV mappings
+      await loadTVMappings();
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to refresh TV state";
+      toast({
+        title: "Refresh Error",
+        description: errorMessage,
         variant: "destructive",
       });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleSync = async (mode: "add" | "reset") => {
+    if (selectedImages.size === 0) {
       return;
     }
 
     try {
       setSyncing(true);
+      setSyncModalOpen(false);
 
-      // Get selected image filepaths
-      const selectedFilepaths = Array.from(selectedImages).map((filename) => {
-        const image = images.find((img) => img.filename === filename);
-        return image?.filepath || filename;
+      // Get TV settings
+      const settingsResponse = await fetch("/api/settings");
+      const settings = await settingsResponse.json();
+
+      // Call sync API with gallery_image_ids
+      const response = await syncApi.sync({
+        image_paths: [], // Empty array since we're using gallery_image_ids
+        gallery_image_ids: Array.from(selectedImages),
+        ip_address: settings.ipAddress,
+        port: settings.port || 8002,
+        mode,
       });
 
-      // Call sync API
-      const response = await fetch("/api/sync", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          imagePaths: selectedFilepaths,
-        }),
-      });
-
-      const data: SyncResponse = await response.json();
-
-      if (!response.ok || !data.success) {
-        // Handle errors
-        const errorMessage = data.error || "Failed to sync images";
-
-        if (data.failed && data.failed.length > 0) {
-          // Partial success - show failed images
-          const failedList = data.failed.map((f) => f.filename).join(", ");
-          toast({
-            title: "Sync completed with errors",
-            description: `${
-              data.successful || 0
-            } images synced successfully. Failed: ${failedList}`,
-            variant: "destructive",
-          });
-        } else {
-          // Complete failure
-          toast({
-            title: "Sync failed",
-            description: errorMessage,
-            variant: "destructive",
-          });
-        }
+      if (!response.success) {
+        const errorMessage =
+          response.failed?.[0]?.error || "Failed to sync images";
+        toast({
+          title: "Sync failed",
+          description: errorMessage,
+          variant: "destructive",
+        });
         return;
       }
 
-      // Success handling
-      const syncedCount =
-        data.synced?.length || data.successful || selectedImages.size;
-      const failedCount = data.failed?.length || 0;
+      const syncedCount = response.successful || 0;
+      const failedCount = response.failed?.length || 0;
 
       if (failedCount > 0) {
-        // Partial success
-        const failedList = data.failed
-          .map((f) => `${f.filename} (${f.error})`)
-          .join(", ");
         toast({
           title: "Sync completed with some errors",
-          description: `${syncedCount} images synced successfully. ${failedCount} failed: ${failedList}`,
+          description: `${syncedCount} images synced successfully. ${failedCount} failed.`,
           variant: "destructive",
         });
       } else {
-        // Complete success
         toast({
           title: "Sync successful",
           description: `Successfully synced ${syncedCount} ${
             syncedCount === 1 ? "image" : "images"
           } to TV`,
         });
-        // Clear selection after successful sync
         setSelectedImages(new Set());
+        await loadTVMappings();
       }
     } catch (error) {
       const errorMessage =
@@ -244,6 +239,16 @@ export default function GalleryPage() {
   };
 
   const selectedCount = selectedImages.size;
+
+  // Calculate sync preview counts for modal
+  const selectedGalleryIds = Array.from(selectedImages);
+  const existingMappings = selectedGalleryIds.filter((id) =>
+    tvMappings.has(id)
+  );
+  const newCount = selectedGalleryIds.length - existingMappings.length;
+  // For reset mode, we'd remove all app-managed images not in selection
+  // For now, just show new count
+  const removeCount = 0; // Will be calculated in modal based on mode
 
   if (loading) {
     return (
@@ -271,6 +276,23 @@ export default function GalleryPage() {
     <div className="min-h-screen bg-background">
       {/* Top bar with navigation */}
       <Navigation>
+        <Button
+          variant="outline"
+          onClick={handleRefreshTVState}
+          disabled={refreshing}
+        >
+          {refreshing ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Refreshing...
+            </>
+          ) : (
+            <>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Refresh TV State
+            </>
+          )}
+        </Button>
         {selectedCount > 0 && (
           <>
             <span className="text-sm text-muted-foreground">
@@ -279,7 +301,7 @@ export default function GalleryPage() {
             </span>
             <Button
               variant="default"
-              onClick={handleSync}
+              onClick={() => setSyncModalOpen(true)}
               disabled={syncing || selectedCount === 0}
             >
               {syncing ? (
@@ -298,6 +320,16 @@ export default function GalleryPage() {
         <ThemeToggle />
       </Navigation>
 
+      {/* Sync Modal */}
+      <SyncModal
+        open={syncModalOpen}
+        onClose={() => setSyncModalOpen(false)}
+        onConfirm={handleSync}
+        selectedCount={selectedCount}
+        newCount={newCount}
+        removeCount={removeCount}
+      />
+
       {/* Sync progress bar */}
       {syncing && (
         <div className="px-6 py-2 border-b border-border bg-muted">
@@ -311,21 +343,6 @@ export default function GalleryPage() {
             <span className="text-xs text-muted-foreground min-w-[60px] text-right">
               Syncing...
             </span>
-          </div>
-        </div>
-      )}
-
-      {/* TV configuration banner */}
-      {tvConfigured === false && (
-        <div className="px-6 py-3 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-yellow-800 dark:text-yellow-200">
-              TV not configured. Please go to{" "}
-              <Link href="/settings" className="underline font-medium">
-                Settings
-              </Link>{" "}
-              to set up your Frame TV connection.
-            </p>
           </div>
         </div>
       )}
@@ -346,16 +363,20 @@ export default function GalleryPage() {
               style={{ columnFill: "balance" }}
             >
               {images.map((image) => {
-                const isSelected = selectedImages.has(image.filename);
+                const isSelected = selectedImages.has(image.id || 0);
+                const isSynced = image.id && tvMappings.has(image.id);
                 return (
-                  <div key={image.filename} className="mb-4 break-inside-avoid">
+                  <div
+                    key={image.id || image.filename}
+                    className="mb-4 break-inside-avoid"
+                  >
                     <div
                       className={`relative group cursor-pointer rounded-lg overflow-hidden bg-muted border-2 transition-all ${
                         isSelected
                           ? "border-primary ring-2 ring-primary/20"
                           : "border-transparent hover:border-border"
                       }`}
-                      onClick={() => toggleImageSelection(image.filename)}
+                      onClick={() => toggleImageSelection(image.id || 0)}
                     >
                       <img
                         src={getImageUrl(image.filepath)}
@@ -363,10 +384,16 @@ export default function GalleryPage() {
                         className="w-full h-auto object-contain"
                         loading="lazy"
                         onError={(e) => {
-                          // Fallback if image fails to load
                           (e.target as HTMLImageElement).style.display = "none";
                         }}
                       />
+                      {/* Sync badge */}
+                      {isSynced && (
+                        <div className="absolute top-2 left-2 bg-green-500 text-white rounded-full p-1">
+                          <CheckCircle2 className="h-4 w-4" />
+                        </div>
+                      )}
+                      {/* Selection indicator */}
                       {isSelected && (
                         <div className="absolute top-2 right-2 bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-xs font-semibold">
                           ✓

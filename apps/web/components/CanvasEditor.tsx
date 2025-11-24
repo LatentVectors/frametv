@@ -101,7 +101,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
     useEffect(() => {
       setHoveredSlotId(null);
       setSelectedSlotId(null);
-    }, [template.id]);
+    }, [template.id, setSelectedSlotId]);
 
     // Calculate scale factor to convert from canvas internal coordinates (3840×2160) to preview size
     const scaleX = useMemo(
@@ -439,7 +439,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
           });
 
           // Apply filters if any are set (respecting enabled flags)
-          const filters: Konva.Filter[] = [];
+          const filters: (typeof Konva.Filters[keyof typeof Konva.Filters])[] = [];
           
           // Global master switch
           const filtersEnabled = assignment.filtersEnabled ?? true;
@@ -481,7 +481,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
           const shouldApplyTint = filtersEnabled && tintEnabled && 
             assignment.tint !== undefined && assignment.tint !== 0;
           const temperatureTintFilter =
-            (Konva.Filters as Record<string, Konva.Filter>).TemperatureTint;
+            (Konva.Filters as Record<string, typeof Konva.Filters[keyof typeof Konva.Filters]>).TemperatureTint;
           if ((shouldApplyTemperature || shouldApplyTint) && temperatureTintFilter) {
             filters.push(temperatureTintFilter);
           }
@@ -557,7 +557,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       if (clickedOnEmpty) {
         setSelectedSlotId(null);
       }
-    }, []);
+    }, [setSelectedSlotId]);
 
     const handleSlotMouseEnter = useCallback((slotId: string) => {
       setHoveredSlotId(slotId);
@@ -578,12 +578,12 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
           }
         };
       },
-      [imageAssignments]
+      [imageAssignments, setSelectedSlotId]
     );
 
     const handleImageSelect = useCallback((slotId: string) => {
       setSelectedSlotId(slotId);
-    }, []);
+    }, [setSelectedSlotId]);
 
     const handleTransformUpdate = useCallback(
       (slotId: string) => {
@@ -674,7 +674,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
                 scaleY={scaleY}
                 isHovered={hoveredSlotId === slot.id}
                 onMouseEnter={() => handleSlotMouseEnter(slot.id)}
-                onMouseLeave={() => handleSlotMouseLeave(slot.id)}
+                onMouseLeave={handleSlotMouseLeave}
                 onClick={handleSlotClick(slot.id)}
               />
             ))}
@@ -694,7 +694,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
                   onTransformUpdate={handleTransformUpdate(slotId)}
                   onScaleUpdate={handleScaleUpdate(slotId)}
                   onMouseEnter={() => handleSlotMouseEnter(slotId)}
-                  onMouseLeave={() => handleSlotMouseLeave(slotId)}
+                  onMouseLeave={handleSlotMouseLeave}
                 />
               );
             })}

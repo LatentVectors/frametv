@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { RefreshCw, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,12 +43,7 @@ export function AlbumSelector() {
     null
   );
 
-  // Fetch albums on mount
-  useEffect(() => {
-    fetchAlbums();
-  }, []);
-
-  const fetchAlbums = async () => {
+  const fetchAlbums = useCallback(async () => {
     try {
       setIsLoadingState(true);
       setError(null);
@@ -86,7 +81,12 @@ export function AlbumSelector() {
     } finally {
       setIsLoadingState(false);
     }
-  };
+  }, [selectedAlbum]);
+
+  // Fetch albums on mount
+  useEffect(() => {
+    fetchAlbums();
+  }, [fetchAlbums]);
 
   const handleAlbumSelect = async (albumName: string) => {
     try {

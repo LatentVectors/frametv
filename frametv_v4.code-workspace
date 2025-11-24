@@ -4,6 +4,12 @@
 			"path": "."
 		},
 		{
+			"path": "apps/tvtest"
+		},
+		{
+			"path": "apps/database-service"
+		},
+		{
 			"path": "apps/sync-service"
 		},
 		{

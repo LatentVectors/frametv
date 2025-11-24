@@ -7,10 +7,10 @@ type TemperatureTintAttrs = {
 
 const clampChannel = (value: number) => Math.max(0, Math.min(255, value));
 
-const TemperatureTintFilter: Konva.Filter = function (imageData) {
+const TemperatureTintFilter: typeof Konva.Filters[keyof typeof Konva.Filters] = function (this: Konva.Node & TemperatureTintAttrs, imageData: ImageData) {
   const data = imageData.data;
   const { _temperatureAdjustment = 0, _tintAdjustment = 0 } =
-    (this as Konva.Node & TemperatureTintAttrs).attrs;
+    this.attrs;
 
   if (_temperatureAdjustment === 0 && _tintAdjustment === 0) {
     return;
@@ -57,8 +57,8 @@ const TemperatureTintFilter: Konva.Filter = function (imageData) {
   }
 };
 
-if (!(Konva.Filters as Record<string, Konva.Filter>).TemperatureTint) {
-  (Konva.Filters as Record<string, Konva.Filter>).TemperatureTint = TemperatureTintFilter;
+if (!(Konva.Filters as Record<string, typeof Konva.Filters[keyof typeof Konva.Filters]>).TemperatureTint) {
+  (Konva.Filters as Record<string, typeof Konva.Filters[keyof typeof Konva.Filters]>).TemperatureTint = TemperatureTintFilter;
 }
 
 export function applyTemperatureTintAttributes(
