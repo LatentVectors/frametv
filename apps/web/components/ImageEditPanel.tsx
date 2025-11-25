@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { ImageAssignment } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Input } from '@/components/ui/input';
-import { FlipHorizontal, RotateCcw, Eye, EyeOff, Sun, ChevronDown, ChevronUp } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { FlipHorizontal, RotateCcw, Eye, EyeOff, Sun, ChevronDown, ChevronUp, Palette } from 'lucide-react';
 
 // Custom adjustment icons matching Photoshop's design
 const ContrastIcon = () => (
@@ -54,10 +55,19 @@ const TemperatureIcon = () => (
 
 const TintIcon = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="8" cy="8" r="6" fill="#ec4899" />
-    <path d="M8 2 A 6 6 0 0 1 8 14 Z" fill="#10b981" />
+    {/* Green on left (negative), Magenta on right (positive) - matches Photoshop convention */}
+    <circle cx="8" cy="8" r="6" fill="#10b981" />
+    <path d="M8 2 A 6 6 0 0 1 8 14 Z" fill="#ec4899" />
   </svg>
 );
+
+// Monochrome colors
+const MONOCHROME_COLORS = [
+  '#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6',
+  '#8b5cf6', '#ec4899', '#78716c', '#1f2937', '#f5f5f4', '#6366f1'
+];
+
+type FilterPreset = 'none' | 'blackWhite' | 'sepia' | 'monochrome';
 
 interface ImageEditPanelProps {
   assignment: ImageAssignment | null;
@@ -75,6 +85,7 @@ export function ImageEditPanel({ assignment, onUpdate, disabled = false }: Image
   const temperature = assignment?.temperature ?? 0;
   const tint = assignment?.tint ?? 0;
   const mirrorX = assignment?.mirrorX ?? false;
+  const monochromeColor = assignment?.monochromeColor;
 
   const filtersEnabled = assignment?.filtersEnabled ?? true;
   const brightnessEnabled = assignment?.brightnessEnabled ?? true;
@@ -83,6 +94,20 @@ export function ImageEditPanel({ assignment, onUpdate, disabled = false }: Image
   const hueEnabled = assignment?.hueEnabled ?? true;
   const temperatureEnabled = assignment?.temperatureEnabled ?? true;
   const tintEnabled = assignment?.tintEnabled ?? true;
+
+  // Determine active preset - presets are mutually exclusive
+  const activePreset = useMemo((): FilterPreset => {
+    if (monochromeColor) return 'monochrome';
+    // Check for exact Black & White values
+    if (saturation === -100 && temperature === 0 && brightness === 0 && !monochromeColor) {
+      return 'blackWhite';
+    }
+    // Check for exact Sepia values
+    if (temperature === 30 && saturation === -50 && brightness === 10 && !monochromeColor) {
+      return 'sepia';
+    }
+    return 'none';
+  }, [monochromeColor, saturation, temperature, brightness]);
 
   const handleGlobalReset = () => {
     onUpdate({
@@ -93,14 +118,71 @@ export function ImageEditPanel({ assignment, onUpdate, disabled = false }: Image
       temperature: 0,
       tint: 0,
       mirrorX: false,
+      monochromeColor: undefined,
     });
   };
+
+  // Filter preset handlers - each preset is exclusive
+  const handleBlackWhitePreset = useCallback(() => {
+    if (activePreset === 'blackWhite') {
+      // If already active, clear the preset
+      onUpdate({
+        saturation: 0,
+        monochromeColor: undefined,
+      });
+    } else {
+      // Activate Black & White: sets saturation to -100, clears other preset values
+      onUpdate({
+        saturation: -100,
+        temperature: 0,
+        brightness: 0,
+        monochromeColor: undefined,
+      });
+    }
+  }, [activePreset, onUpdate]);
+
+  const handleSepiaPreset = useCallback(() => {
+    if (activePreset === 'sepia') {
+      // If already active, clear the preset
+      onUpdate({
+        temperature: 0,
+        saturation: 0,
+        brightness: 0,
+        monochromeColor: undefined,
+      });
+    } else {
+      // Activate Sepia: sets temperature, saturation, brightness
+      onUpdate({
+        temperature: 30,
+        saturation: -50,
+        brightness: 10,
+        monochromeColor: undefined,
+      });
+    }
+  }, [activePreset, onUpdate]);
+
+  const handleMonochromePreset = useCallback((color: string) => {
+    // Activate Monochrome with the chosen color, reset saturation
+    onUpdate({
+      monochromeColor: color,
+      saturation: 0,
+      temperature: 0,
+      brightness: 0,
+    });
+  }, [onUpdate]);
+
+  const handleClearMonochrome = useCallback(() => {
+    onUpdate({ monochromeColor: undefined });
+  }, [onUpdate]);
 
   const handleGlobalToggle = () => {
     onUpdate({ filtersEnabled: !filtersEnabled });
   };
 
-  const hasAdjustments = assignment ? (brightness !== 0 || contrast !== 0 || saturation !== 0 || hue !== 0 || temperature !== 0 || tint !== 0 || mirrorX) : false;
+  const hasAdjustments = assignment ? (
+    brightness !== 0 || contrast !== 0 || saturation !== 0 || 
+    hue !== 0 || temperature !== 0 || tint !== 0 || mirrorX || monochromeColor
+  ) : false;
 
   return (
     <div className="w-full border-t bg-background">
@@ -175,6 +257,97 @@ export function ImageEditPanel({ assignment, onUpdate, disabled = false }: Image
           }`}
         >
           <div className="px-6 pb-6">
+            {/* Filter Presets - Mutually Exclusive */}
+            <div className="mb-4 pb-4 border-b border-border">
+              <label className="text-sm font-medium mb-2 block">Filter Presets</label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant={activePreset === 'blackWhite' ? "default" : "outline"}
+                  size="sm"
+                  onClick={handleBlackWhitePreset}
+                  disabled={disabled}
+                  className="h-7 text-xs"
+                >
+                  Black & White
+                </Button>
+                <Button
+                  variant={activePreset === 'sepia' ? "default" : "outline"}
+                  size="sm"
+                  onClick={handleSepiaPreset}
+                  disabled={disabled}
+                  className="h-7 text-xs"
+                >
+                  Sepia
+                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant={activePreset === 'monochrome' ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => {
+                      if (activePreset === 'monochrome') {
+                        handleClearMonochrome();
+                      } else {
+                        handleMonochromePreset('#3b82f6');
+                      }
+                    }}
+                    disabled={disabled}
+                    className="h-7 text-xs"
+                  >
+                    Monochrome
+                  </Button>
+                  {/* Always-visible color swatch */}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        className={`w-7 h-7 rounded border-2 flex items-center justify-center transition-opacity ${
+                          activePreset === 'monochrome' 
+                            ? 'border-foreground opacity-100' 
+                            : 'border-muted opacity-50 hover:opacity-75'
+                        }`}
+                        style={{ backgroundColor: monochromeColor || '#3b82f6' }}
+                        disabled={disabled}
+                      >
+                        <Palette className="h-3.5 w-3.5 text-white drop-shadow" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-3">
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium">Select Monochrome Color</label>
+                        <div className="grid grid-cols-6 gap-1">
+                          {MONOCHROME_COLORS.map((color) => (
+                            <button
+                              key={color}
+                              className={`w-6 h-6 rounded border-2 ${
+                                monochromeColor === color ? 'border-foreground' : 'border-transparent'
+                              }`}
+                              style={{ backgroundColor: color }}
+                              onClick={() => handleMonochromePreset(color)}
+                            />
+                          ))}
+                        </div>
+                        <Input
+                          type="color"
+                          value={monochromeColor || '#3b82f6'}
+                          onChange={(e) => handleMonochromePreset(e.target.value)}
+                          className="h-8 w-full cursor-pointer"
+                        />
+                        {monochromeColor && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleClearMonochrome}
+                            className="w-full h-7 text-xs"
+                          >
+                            Clear Monochrome
+                          </Button>
+                        )}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+            </div>
+
             {/* Controls Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Column 1: Mirror */}
@@ -338,8 +511,8 @@ function SliderControl({
   };
 
   return (
-    <div className={`flex items-center gap-2 ${!isActive ? 'opacity-50' : ''}`}>
-      <div className="w-7 h-7 flex items-center justify-center flex-shrink-0" title={label}>
+    <div className={`flex items-center gap-1.5 ${!isActive ? 'opacity-50' : ''}`}>
+      <div className="w-6 h-6 flex items-center justify-center flex-shrink-0" title={label}>
         {icon}
       </div>
       <Slider
@@ -358,7 +531,7 @@ function SliderControl({
         onBlur={handleInputBlur}
         min={min}
         max={max}
-        className="w-14 h-7 text-xs text-center"
+        className="w-12 h-6 text-xs text-center px-1"
         disabled={!isActive}
       />
       <Button
@@ -366,13 +539,13 @@ function SliderControl({
         size="sm"
         onClick={onToggle}
         disabled={disabled}
-        className="h-7 w-7 p-0 flex-shrink-0"
+        className="h-6 w-6 p-0 flex-shrink-0"
         title={enabled ? `Disable ${label}` : `Enable ${label}`}
       >
         {enabled ? (
-          <Eye className="h-3.5 w-3.5" />
+          <Eye className="h-3 w-3" />
         ) : (
-          <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
+          <EyeOff className="h-3 w-3 text-muted-foreground" />
         )}
       </Button>
       <Button
@@ -380,12 +553,11 @@ function SliderControl({
         size="sm"
         onClick={onReset}
         disabled={disabled || !hasValue}
-        className="h-7 w-7 p-0 flex-shrink-0"
+        className="h-6 w-6 p-0 flex-shrink-0"
         title={`Reset ${label}`}
       >
-        <RotateCcw className="h-3.5 w-3.5" />
+        <RotateCcw className="h-3 w-3" />
       </Button>
     </div>
   );
 }
-

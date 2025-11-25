@@ -3,16 +3,37 @@ API router for GalleryImage endpoints.
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session
+from sqlmodel import Session, select
 from pydantic import BaseModel
 
 from database import get_session
-from models import GalleryImage, ImageSlot
-from repositories import GalleryImageRepository
+from models import GalleryImage, ImageSlot, Tag, SourceImage, MetadataSnapshot
+from repositories import (
+    GalleryImageRepository, 
+    SourceImageRepository,
+    TagRepository,
+    GalleryImageTagRepository,
+)
 
 router = APIRouter(prefix="/gallery-images", tags=["gallery-images"])
+
+
+class ImageSlotCreate(BaseModel):
+    """Image slot creation model."""
+    slot_number: int
+    source_image_id: Optional[int] = None
+    transform_data: Optional[Dict[str, Any]] = None
+
+
+class GalleryImageCreate(BaseModel):
+    """Gallery image creation request with slots."""
+    filename: str
+    filepath: str
+    template_id: str
+    notes: Optional[str] = None
+    slots: List[ImageSlotCreate] = []
 
 
 class GalleryImageWithSlots(BaseModel):
@@ -35,15 +56,72 @@ class PaginatedResponse(BaseModel):
     pages: int
 
 
+def _create_metadata_snapshot(source_image: SourceImage) -> MetadataSnapshot:
+    """Create a MetadataSnapshot from a SourceImage."""
+    exif_metadata = source_image.get_exif_metadata()
+    return MetadataSnapshot(
+        filename=source_image.filename,
+        filepath=source_image.filepath,
+        date_taken=source_image.date_taken,
+        exif_metadata=exif_metadata,
+    )
+
+
 @router.get("", response_model=PaginatedResponse)
 async def list_gallery_images(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
+    tags: Optional[str] = Query(None, description="Comma-separated list of tag names to filter by"),
     session: Session = Depends(get_session),
 ):
-    """List gallery images with pagination."""
+    """List gallery images with pagination and optional tag filtering."""
     repo = GalleryImageRepository(session)
     skip = (page - 1) * limit
+    
+    # Handle tag filtering
+    if tags:
+        tag_names = [t.strip() for t in tags.split(",") if t.strip()]
+        if tag_names:
+            tag_repo = TagRepository(session)
+            tag_objs = []
+            for name in tag_names:
+                tag = tag_repo.get_by_name(name)
+                if tag:
+                    tag_objs.append(tag)
+            
+            if tag_objs:
+                tag_ids = [t.id for t in tag_objs]
+                gallery_tag_repo = GalleryImageTagRepository(session)
+                gallery_image_ids = gallery_tag_repo.get_gallery_image_ids_with_all_tags(tag_ids)
+                
+                # If no images match the tags, return empty
+                if not gallery_image_ids:
+                    return PaginatedResponse(
+                        items=[],
+                        total=0,
+                        page=page,
+                        pages=1,
+                    )
+                
+                # Filter by matching IDs
+                statement = (
+                    select(GalleryImage)
+                    .where(GalleryImage.id.in_(gallery_image_ids))
+                    .offset(skip)
+                    .limit(limit)
+                )
+                items = list(session.exec(statement).all())
+                total = len(gallery_image_ids)
+                pages = (total + limit - 1) // limit if total > 0 else 1
+                
+                return PaginatedResponse(
+                    items=items,
+                    total=total,
+                    page=page,
+                    pages=pages,
+                )
+    
+    # No tag filter - return all
     items = repo.get_all(skip=skip, limit=limit)
     total = repo.count()
     pages = (total + limit - 1) // limit if total > 0 else 1
@@ -83,33 +161,149 @@ async def get_gallery_image(
     )
 
 
-@router.post("", response_model=GalleryImage, status_code=201)
+@router.post("", response_model=GalleryImageWithSlots, status_code=201)
 async def create_gallery_image(
-    image: GalleryImage,
+    request: GalleryImageCreate,
     session: Session = Depends(get_session),
 ):
-    """Create a new gallery image record."""
+    """Create a new gallery image with slots."""
     repo = GalleryImageRepository(session)
-    return repo.create(image)
+    source_repo = SourceImageRepository(session)
+    
+    # Create the gallery image
+    gallery_image = GalleryImage(
+        filename=request.filename,
+        filepath=request.filepath,
+        template_id=request.template_id,
+        notes=request.notes,
+    )
+    created_image = repo.create(gallery_image)
+    
+    # Track source image IDs for usage count updates
+    source_image_ids_to_increment = []
+    
+    # Create slots
+    created_slots = []
+    for slot_data in request.slots:
+        slot = ImageSlot(
+            gallery_image_id=created_image.id,
+            slot_number=slot_data.slot_number,
+            source_image_id=slot_data.source_image_id,
+            transform_data=slot_data.transform_data,
+        )
+        
+        # Populate metadata snapshot if source_image_id is set
+        if slot_data.source_image_id:
+            source_image = source_repo.get(slot_data.source_image_id)
+            if source_image:
+                snapshot = _create_metadata_snapshot(source_image)
+                slot.set_metadata_snapshot(snapshot)
+                source_image_ids_to_increment.append(slot_data.source_image_id)
+        
+        session.add(slot)
+        created_slots.append(slot)
+    
+    session.commit()
+    
+    # Refresh slots to get IDs
+    for slot in created_slots:
+        session.refresh(slot)
+    
+    # Increment usage counts
+    source_repo.batch_increment_usage(source_image_ids_to_increment)
+    
+    return GalleryImageWithSlots(
+        id=created_image.id,
+        filename=created_image.filename,
+        filepath=created_image.filepath,
+        template_id=created_image.template_id,
+        notes=created_image.notes,
+        created_at=created_image.created_at,
+        updated_at=created_image.updated_at,
+        slots=created_slots,
+    )
 
 
-@router.put("/{id}", response_model=GalleryImage)
+@router.put("/{id}", response_model=GalleryImageWithSlots)
 async def update_gallery_image(
     id: int,
-    image: GalleryImage,
+    request: GalleryImageCreate,
     session: Session = Depends(get_session),
 ):
-    """Update a gallery image."""
+    """Update a gallery image and its slots."""
     repo = GalleryImageRepository(session)
+    source_repo = SourceImageRepository(session)
+    
     existing = repo.get(id)
     if not existing:
         raise HTTPException(status_code=404, detail="Gallery image not found")
     
-    # Update fields
-    for field, value in image.model_dump(exclude={"id"}).items():
-        setattr(existing, field, value)
+    # Get old slots for comparison
+    old_slots = repo.get_slots(id)
+    old_source_ids = {slot.source_image_id for slot in old_slots if slot.source_image_id}
     
-    return repo.update(existing)
+    # Update gallery image fields
+    existing.filename = request.filename
+    existing.filepath = request.filepath
+    existing.template_id = request.template_id
+    existing.notes = request.notes
+    existing.updated_at = datetime.utcnow()
+    
+    session.add(existing)
+    
+    # Delete old slots
+    for slot in old_slots:
+        session.delete(slot)
+    
+    # Track new source image IDs
+    new_source_ids = set()
+    
+    # Create new slots
+    created_slots = []
+    for slot_data in request.slots:
+        slot = ImageSlot(
+            gallery_image_id=id,
+            slot_number=slot_data.slot_number,
+            source_image_id=slot_data.source_image_id,
+            transform_data=slot_data.transform_data,
+        )
+        
+        # Populate metadata snapshot if source_image_id is set
+        if slot_data.source_image_id:
+            source_image = source_repo.get(slot_data.source_image_id)
+            if source_image:
+                snapshot = _create_metadata_snapshot(source_image)
+                slot.set_metadata_snapshot(snapshot)
+                new_source_ids.add(slot_data.source_image_id)
+        
+        session.add(slot)
+        created_slots.append(slot)
+    
+    session.commit()
+    
+    # Refresh slots to get IDs
+    for slot in created_slots:
+        session.refresh(slot)
+    
+    # Update usage counts: decrement for removed, increment for added
+    ids_to_decrement = list(old_source_ids - new_source_ids)
+    ids_to_increment = list(new_source_ids - old_source_ids)
+    
+    source_repo.batch_decrement_usage(ids_to_decrement)
+    source_repo.batch_increment_usage(ids_to_increment)
+    
+    session.refresh(existing)
+    
+    return GalleryImageWithSlots(
+        id=existing.id,
+        filename=existing.filename,
+        filepath=existing.filepath,
+        template_id=existing.template_id,
+        notes=existing.notes,
+        created_at=existing.created_at,
+        updated_at=existing.updated_at,
+        slots=created_slots,
+    )
 
 
 @router.delete("/{id}", status_code=204)
@@ -117,8 +311,86 @@ async def delete_gallery_image(
     id: int,
     session: Session = Depends(get_session),
 ):
-    """Delete a gallery image."""
+    """Delete a gallery image and decrement usage counts."""
     repo = GalleryImageRepository(session)
-    if not repo.delete(id):
+    source_repo = SourceImageRepository(session)
+    
+    existing = repo.get(id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Gallery image not found")
+    
+    # Get slots to track source image IDs
+    slots = repo.get_slots(id)
+    source_image_ids = [slot.source_image_id for slot in slots if slot.source_image_id]
+    
+    # Delete the gallery image (will cascade to slots if configured, or manually delete)
+    for slot in slots:
+        session.delete(slot)
+    session.delete(existing)
+    session.commit()
+    
+    # Decrement usage counts
+    source_repo.batch_decrement_usage(source_image_ids)
+
+
+# Tag endpoints for gallery images
+@router.get("/{id}/tags", response_model=List[Tag])
+async def get_gallery_image_tags(
+    id: int,
+    session: Session = Depends(get_session),
+):
+    """Get all tags for a gallery image."""
+    repo = GalleryImageRepository(session)
+    image = repo.get(id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    
+    tag_repo = GalleryImageTagRepository(session)
+    return tag_repo.get_tags_for_gallery_image(id)
+
+
+class AddTagRequest(BaseModel):
+    """Request model for adding a tag."""
+    tag_name: str
+    tag_color: Optional[str] = None
+
+
+@router.post("/{id}/tags", response_model=Tag, status_code=201)
+async def add_tag_to_gallery_image(
+    id: int,
+    request: AddTagRequest,
+    session: Session = Depends(get_session),
+):
+    """Add a tag to a gallery image. Creates tag if it doesn't exist."""
+    repo = GalleryImageRepository(session)
+    image = repo.get(id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    
+    # Get or create tag
+    tag_repo = TagRepository(session)
+    tag = tag_repo.get_or_create(request.tag_name, request.tag_color)
+    
+    # Add tag to gallery image
+    gallery_tag_repo = GalleryImageTagRepository(session)
+    gallery_tag_repo.add_tag_to_gallery_image(id, tag.id)
+    
+    return tag
+
+
+@router.delete("/{id}/tags/{tag_id}", status_code=204)
+async def remove_tag_from_gallery_image(
+    id: int,
+    tag_id: int,
+    session: Session = Depends(get_session),
+):
+    """Remove a tag from a gallery image."""
+    repo = GalleryImageRepository(session)
+    image = repo.get(id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Gallery image not found")
+    
+    gallery_tag_repo = GalleryImageTagRepository(session)
+    if not gallery_tag_repo.remove_tag_from_gallery_image(id, tag_id):
+        raise HTTPException(status_code=404, detail="Tag not found on this gallery image")
 

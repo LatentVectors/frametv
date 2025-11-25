@@ -14,6 +14,7 @@ import { ImageModal } from "@/components/ImageModal";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { ChevronUp, SlidersHorizontal, ArrowDownWideNarrow, ArrowUpWideNarrow } from "lucide-react";
+import { TagFilter } from "@/components/TagInput";
 
 interface ImageSidebarProps {
   width: number;
@@ -29,6 +30,10 @@ function SidebarHeader() {
     setThumbnailSize, 
     sortOrder, 
     setSortOrder,
+    usageFilter,
+    setUsageFilter,
+    tagFilter,
+    setTagFilter,
     setImages,
     setHasMore,
     setCurrentPage,
@@ -221,6 +226,55 @@ function SidebarHeader() {
                   </span>
                 </Button>
               </div>
+            </div>
+          </div>
+
+          {/* Usage Filter */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-foreground">
+                Usage
+              </label>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant={usageFilter === "all" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setUsageFilter("all")}
+                  className="h-7 px-2 text-xs"
+                >
+                  All
+                </Button>
+                <Button
+                  variant={usageFilter === "used" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setUsageFilter("used")}
+                  className="h-7 px-2 text-xs"
+                >
+                  Used
+                </Button>
+                <Button
+                  variant={usageFilter === "unused" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setUsageFilter("unused")}
+                  className="h-7 px-2 text-xs"
+                >
+                  Unused
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Tag Filter */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-foreground">
+                Tags
+              </label>
+              <TagFilter
+                selectedTags={tagFilter}
+                onTagsChange={setTagFilter}
+                compact
+              />
             </div>
           </div>
 

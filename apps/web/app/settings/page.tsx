@@ -3,10 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2 } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import { Navigation } from "@/components/Navigation";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { settingsApi } from "@/lib/api";
+import { settingsApi, sourceImagesApi } from "@/lib/api";
 import {
   Select,
   SelectContent,
@@ -32,6 +32,7 @@ export default function SettingsPage() {
   >("shuffleslideshow");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
   const { toast } = useToast();
 
   const loadSettings = useCallback(async () => {
@@ -149,6 +150,28 @@ export default function SettingsPage() {
   };
 
   const presetDurations = [1, 3, 5, 10, 15, 30, 60];
+
+  const handleRecalculateUsageCounts = async () => {
+    try {
+      setRecalculating(true);
+      await sourceImagesApi.recalculateUsageCounts();
+      toast({
+        title: "Success",
+        description: "Usage counts have been recalculated",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Failed to recalculate usage counts",
+        variant: "destructive",
+      });
+    } finally {
+      setRecalculating(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -328,6 +351,50 @@ export default function SettingsPage() {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-border"></div>
+
+          {/* Database Maintenance */}
+          <div>
+            <h2 className="text-lg font-semibold mb-4 text-foreground">
+              Database Maintenance
+            </h2>
+            <p className="text-sm text-muted-foreground mb-6">
+              Tools for maintaining database integrity and fixing inconsistencies.
+            </p>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 border border-border rounded-md bg-card">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    Recalculate Usage Counts
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Recalculates how many times each source image is used in galleries
+                  </p>
+                </div>
+                <Button
+                  onClick={handleRecalculateUsageCounts}
+                  disabled={recalculating}
+                  variant="outline"
+                  size="sm"
+                >
+                  {recalculating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Recalculating...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Recalculate
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
 

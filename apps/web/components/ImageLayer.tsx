@@ -6,6 +6,7 @@ import { CANVAS_WIDTH, CANVAS_HEIGHT, PREVIEW_MAX_IMAGE_WIDTH, PREVIEW_MAX_IMAGE
 import { useEffect, useState, memo, useMemo, useCallback, useRef } from 'react';
 import { createPreviewImage } from '@/lib/imageUtils';
 import { applyTemperatureTintAttributes } from '@/lib/filters/temperatureTint';
+import { applyMonochromeAttributes, MonochromeFilter } from '@/lib/filters/monochrome';
 import Konva from 'konva';
 
 interface ImageLayerProps {
@@ -15,6 +16,7 @@ interface ImageLayerProps {
   scaleY: number;
   isSelected?: boolean;
   onSelect?: () => void;
+  onDoubleClick?: () => void;
   onTransformUpdate?: (x: number, y: number) => void;
   onScaleUpdate?: (scaleX: number, scaleY: number) => void;
   onMouseEnter?: () => void;
@@ -28,6 +30,7 @@ function ImageLayer({
   scaleY,
   isSelected = false,
   onSelect,
+  onDoubleClick,
   onTransformUpdate,
   onScaleUpdate,
   onMouseEnter,
@@ -119,6 +122,15 @@ function ImageLayer({
       filters.push(temperatureTintFilter);
     }
     
+    // Apply monochrome filter
+    const shouldApplyMonochrome = filtersEnabled && 
+      assignment.monochromeColor !== undefined && assignment.monochromeColor !== '';
+    const monochromeFilter =
+      (Konva.Filters as Record<string, typeof Konva.Filters[keyof typeof Konva.Filters]>).Monochrome;
+    if (shouldApplyMonochrome && monochromeFilter) {
+      filters.push(monochromeFilter);
+    }
+    
     imageRef.current.filters(filters);
     
     // Set filter values (only if enabled)
@@ -147,6 +159,9 @@ function ImageLayer({
     const tintValue = shouldApplyTint ? (assignment.tint ?? 0) : 0;
     applyTemperatureTintAttributes(imageRef.current, tempValue, tintValue);
     
+    // Apply monochrome color
+    applyMonochromeAttributes(imageRef.current, shouldApplyMonochrome ? (assignment.monochromeColor ?? '') : '');
+    
     imageRef.current.cache();
     imageRef.current.getLayer()?.batchDraw();
   }, [
@@ -156,6 +171,7 @@ function ImageLayer({
     assignment.hue,
     assignment.temperature,
     assignment.tint,
+    assignment.monochromeColor,
     assignment.filtersEnabled,
     assignment.brightnessEnabled,
     assignment.contrastEnabled,
@@ -177,6 +193,26 @@ function ImageLayer({
   const originalWidth = useMemo(() => assignment.originalWidth ?? (previewImage?.width ?? 0), [assignment.originalWidth, previewImage?.width]);
   const originalHeight = useMemo(() => assignment.originalHeight ?? (previewImage?.height ?? 0), [assignment.originalHeight, previewImage?.height]);
   
+  // Get crop values (stored as percentages 0-100 relative to image)
+  const hasCrop = useMemo(() => 
+    assignment.cropX !== undefined && 
+    assignment.cropY !== undefined && 
+    assignment.cropWidth !== undefined && 
+    assignment.cropHeight !== undefined &&
+    (assignment.cropX !== 0 || assignment.cropY !== 0 || 
+     assignment.cropWidth !== 100 || assignment.cropHeight !== 100),
+    [assignment.cropX, assignment.cropY, assignment.cropWidth, assignment.cropHeight]
+  );
+  
+  // Crop bounds in percentage (0-100) - default to full image
+  const cropX = useMemo(() => assignment.cropX ?? 0, [assignment.cropX]);
+  const cropY = useMemo(() => assignment.cropY ?? 0, [assignment.cropY]);
+  const cropWidth = useMemo(() => assignment.cropWidth ?? 100, [assignment.cropWidth]);
+  const cropHeight = useMemo(() => assignment.cropHeight ?? 100, [assignment.cropHeight]);
+  
+  // Rotation angle in degrees
+  const rotation = useMemo(() => assignment.rotation ?? 0, [assignment.rotation]);
+  
   // Calculate effective scale factors for preview image
   // The assignment scales are relative to original dimensions
   // Convert to preview image scale: scale_preview = (originalWidth * scale) / previewWidth
@@ -189,9 +225,42 @@ function ImageLayer({
     return (originalHeight * assignment.scaleY) / previewImage.height;
   }, [originalHeight, assignment.scaleY, previewImage]);
   
+  // Calculate crop dimensions in preview image pixels
+  const cropConfig = useMemo(() => {
+    if (!previewImage) return null;
+    
+    // Convert percentage crop to preview image pixels
+    const previewCropX = (cropX / 100) * previewImage.width;
+    const previewCropY = (cropY / 100) * previewImage.height;
+    const previewCropWidth = (cropWidth / 100) * previewImage.width;
+    const previewCropHeight = (cropHeight / 100) * previewImage.height;
+    
+    return {
+      x: previewCropX,
+      y: previewCropY,
+      width: previewCropWidth,
+      height: previewCropHeight,
+    };
+  }, [previewImage, cropX, cropY, cropWidth, cropHeight]);
+  
   // Calculate image dimensions using preview image and adjusted scales
-  const imageWidth = useMemo(() => (previewImage?.width ?? 0) * previewScaleX, [previewImage?.width, previewScaleX]);
-  const imageHeight = useMemo(() => (previewImage?.height ?? 0) * previewScaleY, [previewImage?.height, previewScaleY]);
+  // When crop is applied, we scale based on the cropped portion size
+  const imageWidth = useMemo(() => {
+    if (!previewImage) return 0;
+    if (hasCrop && cropConfig) {
+      // When cropped, the displayed size is based on the crop region scaled up
+      return cropConfig.width * previewScaleX;
+    }
+    return previewImage.width * previewScaleX;
+  }, [previewImage, hasCrop, cropConfig, previewScaleX]);
+  
+  const imageHeight = useMemo(() => {
+    if (!previewImage) return 0;
+    if (hasCrop && cropConfig) {
+      return cropConfig.height * previewScaleY;
+    }
+    return previewImage.height * previewScaleY;
+  }, [previewImage, hasCrop, cropConfig, previewScaleY]);
 
   // Calculate image position and scale
   // Transform coordinates are relative to the slot
@@ -295,6 +364,16 @@ function ImageLayer({
       onSelect();
     }
   }, [onSelect]);
+
+  /**
+   * Handle image double-click - open editor modal
+   */
+  const handleImageDblClick = useCallback((e: any) => {
+    e.cancelBubble = true;
+    if (onDoubleClick) {
+      onDoubleClick();
+    }
+  }, [onDoubleClick]);
 
   /**
    * Handle mouse wheel zoom - only when image is selected
@@ -403,7 +482,37 @@ function ImageLayer({
   // Handle horizontal mirroring
   const mirrorX = assignment.mirrorX ?? false;
   const imageScaleX = mirrorX ? -1 : 1;
-  const imageOffsetX = mirrorX ? previewWidth : 0;
+  
+  // Calculate center point for rotation
+  // When rotation is applied, we rotate around the center of the displayed image
+  const imageCenterX = previewWidth / 2;
+  const imageCenterY = previewHeight / 2;
+  
+  // Calculate offset for mirroring and rotation
+  // For mirroring, we need to offset by the full width
+  // For rotation, we set the offset to the center
+  const hasRotation = rotation !== 0;
+  let offsetX = 0;
+  let offsetY = 0;
+  
+  if (hasRotation) {
+    // When rotating, offset to center so rotation happens around center
+    offsetX = imageCenterX;
+    offsetY = imageCenterY;
+  }
+  
+  // For mirroring with rotation, we need to handle differently
+  if (mirrorX && !hasRotation) {
+    offsetX = previewWidth;
+  } else if (mirrorX && hasRotation) {
+    // When both mirroring and rotating, the center offset already handles positioning
+    // but we need to flip the scaleX
+  }
+  
+  // Adjust position when using offset for rotation
+  // The position needs to be offset to account for the rotation center
+  const adjustedPreviewX = hasRotation ? previewX + imageCenterX : previewX;
+  const adjustedPreviewY = hasRotation ? previewY + imageCenterY : previewY;
 
   return (
     <Group
@@ -415,17 +524,22 @@ function ImageLayer({
       <KonvaImage
         ref={imageRef}
         image={previewImage}
-        x={previewX}
-        y={previewY}
+        x={adjustedPreviewX}
+        y={adjustedPreviewY}
         width={previewWidth}
         height={previewHeight}
         scaleX={imageScaleX}
-        offsetX={imageOffsetX}
+        offsetX={offsetX}
+        offsetY={offsetY}
+        rotation={rotation}
+        crop={hasCrop && cropConfig ? cropConfig : undefined}
         draggable={true}
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
         onClick={handleImageClick}
         onTap={handleImageClick}
+        onDblClick={handleImageDblClick}
+        onDblTap={handleImageDblClick}
         onWheel={handleWheel}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}

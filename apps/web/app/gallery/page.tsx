@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Loader2, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Loader2, RefreshCw, CheckCircle2, Tag as TagIcon, X, ChevronDown, ChevronUp, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Navigation } from "@/components/Navigation";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { SyncModal } from "@/components/SyncModal";
-import { syncApi, tvContentApi } from "@/lib/api";
+import { TagFilter } from "@/components/TagInput";
+import { syncApi, tvContentApi, galleryImagesApi, tagsApi } from "@/lib/api";
+import { Tag } from "@/types";
 
 interface GalleryImage {
   id?: number;
@@ -15,6 +17,7 @@ interface GalleryImage {
   filepath: string;
   createdAt: string;
   size: number;
+  tags?: Tag[];
 }
 
 interface GalleryResponse {
@@ -32,6 +35,9 @@ interface TVContentMapping {
   sync_status: "synced" | "pending" | "failed" | "manual";
 }
 
+type UsageFilterType = "all" | "onTv" | "notOnTv";
+type SortOrderType = "newest" | "oldest";
+
 export default function GalleryPage() {
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,11 +52,30 @@ export default function GalleryPage() {
   const [tvMappings, setTvMappings] = useState<Map<number, TVContentMapping>>(
     new Map()
   );
+  
+  // Filter state
+  const [filterPanelExpanded, setFilterPanelExpanded] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [usageFilter, setUsageFilter] = useState<UsageFilterType>("all");
+  const [sortOrder, setSortOrder] = useState<SortOrderType>("newest");
+  
+  const [imageTags, setImageTags] = useState<Map<number, Tag[]>>(new Map());
+  const [editingTagsForImage, setEditingTagsForImage] = useState<number | null>(null);
+  const [tagInputValue, setTagInputValue] = useState("");
+  const [tagSuggestions, setTagSuggestions] = useState<Tag[]>([]);
+  const [addingTag, setAddingTag] = useState(false);
   const observerTarget = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
+  // Count active filters
+  const activeFilterCount = [
+    selectedTags.length > 0,
+    usageFilter !== "all",
+    sortOrder !== "newest",
+  ].filter(Boolean).length;
+
   const loadImages = useCallback(
-    async (pageNum: number, append: boolean = false) => {
+    async (pageNum: number, append: boolean = false, tagsFilter?: string[]) => {
       try {
         if (pageNum === 1) {
           setLoading(true);
@@ -59,7 +84,12 @@ export default function GalleryPage() {
         }
         setError(null);
 
-        const response = await fetch(`/api/gallery?page=${pageNum}&limit=50`);
+        let url = `/api/gallery?page=${pageNum}&limit=50`;
+        if (tagsFilter && tagsFilter.length > 0) {
+          url += `&tags=${encodeURIComponent(tagsFilter.join(","))}`;
+        }
+        
+        const response = await fetch(url);
         if (!response.ok) {
           throw new Error("Failed to load images");
         }
@@ -74,6 +104,20 @@ export default function GalleryPage() {
 
         setHasMore(data.hasMore);
         setPage(pageNum);
+
+        // Load tags for each image
+        const newImageTags = new Map<number, Tag[]>(append ? imageTags : undefined);
+        for (const image of data.images) {
+          if (image.id && !newImageTags.has(image.id)) {
+            try {
+              const tags = await galleryImagesApi.getTags(image.id);
+              newImageTags.set(image.id, tags);
+            } catch {
+              newImageTags.set(image.id, []);
+            }
+          }
+        }
+        setImageTags(newImageTags);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load images");
       } finally {
@@ -81,7 +125,7 @@ export default function GalleryPage() {
         setLoadingMore(false);
       }
     },
-    []
+    [imageTags]
   );
 
   const loadTVMappings = useCallback(async () => {
@@ -103,16 +147,16 @@ export default function GalleryPage() {
   }, []);
 
   useEffect(() => {
-    loadImages(1);
+    loadImages(1, false, selectedTags);
     loadTVMappings();
-  }, [loadImages, loadTVMappings]);
+  }, [loadTVMappings, selectedTags]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Infinite scroll observer
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting && hasMore && !loadingMore && !loading) {
-          loadImages(page + 1, true);
+          loadImages(page + 1, true, selectedTags);
         }
       },
       { threshold: 0.1 }
@@ -128,13 +172,84 @@ export default function GalleryPage() {
         observer.unobserve(currentTarget);
       }
     };
-  }, [hasMore, loadingMore, loading, page, loadImages]);
+  }, [hasMore, loadingMore, loading, page, loadImages, selectedTags]);
 
   // Convert filepath to a URL that can be displayed
   const getImageUrl = (filepath: string) => {
     const filename = filepath.split(/[/\\]/).pop();
     return `/api/gallery/image?filename=${encodeURIComponent(filename || "")}`;
   };
+
+  // Load tag suggestions
+  useEffect(() => {
+    const loadSuggestions = async () => {
+      if (tagInputValue.length === 0) {
+        setTagSuggestions([]);
+        return;
+      }
+      try {
+        const allTags = await tagsApi.list(tagInputValue);
+        // Filter out tags already on the image
+        const existingTagIds = new Set(
+          (imageTags.get(editingTagsForImage || 0) || []).map((t) => t.id)
+        );
+        setTagSuggestions(allTags.filter((t) => !existingTagIds.has(t.id)));
+      } catch {
+        setTagSuggestions([]);
+      }
+    };
+
+    const debounce = setTimeout(loadSuggestions, 150);
+    return () => clearTimeout(debounce);
+  }, [tagInputValue, editingTagsForImage, imageTags]);
+
+  // Handle adding a tag to an image
+  const handleAddTag = async (imageId: number, tagName: string, tagColor?: string) => {
+    if (!tagName.trim() || addingTag) return;
+
+    setAddingTag(true);
+    try {
+      const newTag = await galleryImagesApi.addTag(imageId, tagName.trim(), tagColor);
+      setImageTags((prev) => {
+        const newMap = new Map(prev);
+        const existing = newMap.get(imageId) || [];
+        newMap.set(imageId, [...existing, newTag]);
+        return newMap;
+      });
+      setTagInputValue("");
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to add tag",
+        variant: "destructive",
+      });
+    } finally {
+      setAddingTag(false);
+    }
+  };
+
+  // Handle removing a tag from an image
+  const handleRemoveTag = async (imageId: number, tagId: number) => {
+    try {
+      await galleryImagesApi.removeTag(imageId, tagId);
+      setImageTags((prev) => {
+        const newMap = new Map(prev);
+        const existing = newMap.get(imageId) || [];
+        newMap.set(imageId, existing.filter((t) => t.id !== tagId));
+        return newMap;
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to remove tag",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const TAG_COLORS = [
+    "#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899",
+  ];
 
   const toggleImageSelection = (imageId: number) => {
     setSelectedImages((prev) => {
@@ -238,6 +353,7 @@ export default function GalleryPage() {
     }
   };
 
+  // Use selectedImages.size directly for accurate count
   const selectedCount = selectedImages.size;
 
   // Calculate sync preview counts for modal
@@ -249,6 +365,22 @@ export default function GalleryPage() {
   // For reset mode, we'd remove all app-managed images not in selection
   // For now, just show new count
   const removeCount = 0; // Will be calculated in modal based on mode
+
+  // Filter images based on usage filter
+  const filteredImages = images.filter((image) => {
+    if (usageFilter === "all") return true;
+    const isOnTv = image.id ? tvMappings.has(image.id) : false;
+    if (usageFilter === "onTv") return isOnTv;
+    if (usageFilter === "notOnTv") return !isOnTv;
+    return true;
+  });
+
+  // Sort images based on sort order
+  const sortedImages = [...filteredImages].sort((a, b) => {
+    const dateA = new Date(a.createdAt).getTime();
+    const dateB = new Date(b.createdAt).getTime();
+    return sortOrder === "newest" ? dateB - dateA : dateA - dateB;
+  });
 
   if (loading) {
     return (
@@ -276,6 +408,27 @@ export default function GalleryPage() {
     <div className="min-h-screen bg-background">
       {/* Top bar with navigation */}
       <Navigation>
+        {/* Filter toggle button */}
+        <Button
+          variant={filterPanelExpanded ? "default" : "outline"}
+          size="sm"
+          onClick={() => setFilterPanelExpanded(!filterPanelExpanded)}
+          className="gap-2"
+        >
+          <Filter className="h-4 w-4" />
+          Filters
+          {activeFilterCount > 0 && !filterPanelExpanded && (
+            <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary-foreground text-primary rounded-full">
+              {activeFilterCount}
+            </span>
+          )}
+          {filterPanelExpanded ? (
+            <ChevronUp className="h-4 w-4" />
+          ) : (
+            <ChevronDown className="h-4 w-4" />
+          )}
+        </Button>
+        
         <Button
           variant="outline"
           onClick={handleRefreshTVState}
@@ -320,6 +473,91 @@ export default function GalleryPage() {
         <ThemeToggle />
       </Navigation>
 
+      {/* Collapsible Filter Panel */}
+      <div
+        className={`border-b border-border bg-muted/30 overflow-hidden transition-all duration-300 ${
+          filterPanelExpanded ? "max-h-40 py-4" : "max-h-0 py-0"
+        }`}
+      >
+        <div className="px-6 flex flex-wrap items-center gap-4">
+          {/* Tag Filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-muted-foreground">Tags:</span>
+            <TagFilter selectedTags={selectedTags} onTagsChange={setSelectedTags} />
+          </div>
+
+          {/* Usage Filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-muted-foreground">Status:</span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant={usageFilter === "all" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setUsageFilter("all")}
+                className="h-8"
+              >
+                All
+              </Button>
+              <Button
+                variant={usageFilter === "onTv" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setUsageFilter("onTv")}
+                className="h-8"
+              >
+                On TV
+              </Button>
+              <Button
+                variant={usageFilter === "notOnTv" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setUsageFilter("notOnTv")}
+                className="h-8"
+              >
+                Not on TV
+              </Button>
+            </div>
+          </div>
+
+          {/* Sort Order */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-muted-foreground">Sort:</span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant={sortOrder === "newest" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSortOrder("newest")}
+                className="h-8"
+              >
+                Newest First
+              </Button>
+              <Button
+                variant={sortOrder === "oldest" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSortOrder("oldest")}
+                className="h-8"
+              >
+                Oldest First
+              </Button>
+            </div>
+          </div>
+
+          {/* Clear all filters */}
+          {activeFilterCount > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSelectedTags([]);
+                setUsageFilter("all");
+                setSortOrder("newest");
+              }}
+              className="h-8 text-muted-foreground"
+            >
+              Clear all
+            </Button>
+          )}
+        </div>
+      </div>
+
       {/* Sync Modal */}
       <SyncModal
         open={syncModalOpen}
@@ -348,10 +586,12 @@ export default function GalleryPage() {
       )}
 
       {/* Gallery content */}
-      {images.length === 0 ? (
+      {sortedImages.length === 0 ? (
         <div className="flex items-center justify-center min-h-[60vh]">
           <p className="text-muted-foreground">
-            No images saved yet. Create some in the editor!
+            {images.length === 0
+              ? "No images saved yet. Create some in the editor!"
+              : "No images match the current filters."}
           </p>
         </div>
       ) : (
@@ -362,9 +602,11 @@ export default function GalleryPage() {
               className="columns-1 sm:columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-4"
               style={{ columnFill: "balance" }}
             >
-              {images.map((image) => {
+              {sortedImages.map((image) => {
                 const isSelected = selectedImages.has(image.id || 0);
                 const isSynced = image.id && tvMappings.has(image.id);
+                const tags = imageTags.get(image.id || 0) || [];
+                const isEditingTags = editingTagsForImage === image.id;
                 return (
                   <div
                     key={image.id || image.filename}
@@ -399,7 +641,93 @@ export default function GalleryPage() {
                           ✓
                         </div>
                       )}
+                      {/* Tag button - visible on hover */}
+                      <button
+                        className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-background/80 hover:bg-background rounded-full p-1.5"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingTagsForImage(isEditingTags ? null : image.id || null);
+                          setTagInputValue("");
+                        }}
+                      >
+                        <TagIcon className="h-4 w-4" />
+                      </button>
                     </div>
+                    
+                    {/* Tags display */}
+                    {(tags.length > 0 || isEditingTags) && (
+                      <div className="mt-2 space-y-1.5">
+                        {/* Existing tags */}
+                        {tags.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {tags.map((tag) => (
+                              <span
+                                key={tag.id}
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] text-white"
+                                style={{ backgroundColor: tag.color || "#6b7280" }}
+                              >
+                                {tag.name}
+                                {isEditingTags && tag.id !== undefined && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRemoveTag(image.id!, tag.id!);
+                                    }}
+                                    className="hover:bg-white/20 rounded-full p-0.5"
+                                  >
+                                    <X className="h-2.5 w-2.5" />
+                                  </button>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {/* Tag input when editing */}
+                        {isEditingTags && (
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={tagInputValue}
+                              onChange={(e) => setTagInputValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" && tagInputValue.trim()) {
+                                  e.preventDefault();
+                                  const randomColor = TAG_COLORS[Math.floor(Math.random() * TAG_COLORS.length)];
+                                  handleAddTag(image.id!, tagInputValue, randomColor);
+                                } else if (e.key === "Escape") {
+                                  setEditingTagsForImage(null);
+                                }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              placeholder="Add tag..."
+                              className="w-full h-7 px-2 text-xs bg-muted border border-border rounded focus:outline-none focus:ring-1 focus:ring-ring"
+                              autoFocus
+                            />
+                            {tagSuggestions.length > 0 && (
+                              <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-popover border border-border rounded-md shadow-lg overflow-hidden">
+                                {tagSuggestions.slice(0, 5).map((suggestion) => (
+                                  <button
+                                    key={suggestion.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleAddTag(image.id!, suggestion.name, suggestion.color ?? undefined);
+                                    }}
+                                    className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-accent"
+                                  >
+                                    <span
+                                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                      style={{ backgroundColor: suggestion.color || "#6b7280" }}
+                                    />
+                                    {suggestion.name}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -417,10 +745,10 @@ export default function GalleryPage() {
           <div ref={observerTarget} className="h-4" />
 
           {/* End of gallery message */}
-          {!hasMore && images.length > 0 && (
+          {!hasMore && sortedImages.length > 0 && (
             <div className="flex justify-center py-8">
               <p className="text-muted-foreground text-sm">
-                All {images.length} images loaded
+                All {sortedImages.length} images loaded
               </p>
             </div>
           )}

@@ -8,6 +8,7 @@ from sqlmodel import Field, SQLModel, Column, JSON
 from sqlalchemy import JSON as SA_JSON
 
 from .slot_transform import SlotTransform
+from .metadata_snapshot import MetadataSnapshot
 
 
 class ImageSlot(SQLModel, table=True):
@@ -20,6 +21,7 @@ class ImageSlot(SQLModel, table=True):
     slot_number: int  # Slot position (0, 1, 2, etc.)
     source_image_id: Optional[int] = Field(default=None, foreign_key="source_images.id", index=True)
     transform_data: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(SA_JSON))
+    metadata_snapshot: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(SA_JSON))
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow, sa_column_kwargs={"onupdate": datetime.utcnow})
@@ -36,4 +38,17 @@ class ImageSlot(SQLModel, table=True):
             self.transform_data = None
         else:
             self.transform_data = transform.model_dump()
+
+    def get_metadata_snapshot(self) -> Optional[MetadataSnapshot]:
+        """Get metadata_snapshot as MetadataSnapshot object."""
+        if self.metadata_snapshot is None:
+            return None
+        return MetadataSnapshot(**self.metadata_snapshot)
+
+    def set_metadata_snapshot(self, snapshot: Optional[MetadataSnapshot]) -> None:
+        """Set metadata_snapshot from MetadataSnapshot object."""
+        if snapshot is None:
+            self.metadata_snapshot = None
+        else:
+            self.metadata_snapshot = snapshot.model_dump(mode="json")
 

@@ -16,9 +16,11 @@ from routers import (
     gallery_images_router,
     tv_content_router,
     settings_router,
+    tags_router,
 )
 from routers.scanner import router as scanner_router
 from scanner import scan_albums_directory
+from repositories import SourceImageRepository
 from pathlib import Path
 import os
 
@@ -77,6 +79,25 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Startup album scan failed: {e}")
     
+    # Run usage count reconciliation on startup
+    try:
+        from database import get_session
+        
+        session_gen = get_session()
+        session = next(session_gen)
+        try:
+            repo = SourceImageRepository(session)
+            result = repo.recalculate_all_usage_counts()
+            logger.info(
+                f"Usage count reconciliation: {result['total_images']} images, "
+                f"{result['updated_count']} updated, "
+                f"{result['negative_counts_corrected']} negative counts corrected"
+            )
+        finally:
+            session.close()
+    except Exception as e:
+        logger.warning(f"Usage count reconciliation failed: {e}")
+    
     yield
     
     # Shutdown
@@ -111,6 +132,7 @@ app.include_router(scanner_router)  # Scanner endpoints (POST /source-images/sca
 app.include_router(gallery_images_router)
 app.include_router(tv_content_router)
 app.include_router(settings_router)
+app.include_router(tags_router)
 
 
 @app.get("/")

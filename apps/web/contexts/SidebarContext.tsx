@@ -17,7 +17,14 @@ export interface ImageData {
   size: number;
   modifiedDate: string;
   thumbnailDataUrl: string;
+  isUsed?: boolean; // Whether this image is used in any saved GalleryImage
+  sourceImageId?: number; // Database ID for the source image (if available)
 }
+
+/**
+ * Usage filter options for sidebar
+ */
+export type UsageFilter = "all" | "used" | "unused";
 
 /**
  * Sort order for images
@@ -43,6 +50,12 @@ interface SidebarContextType {
   // Sort order
   sortOrder: SortOrder;
 
+  // Usage filter
+  usageFilter: UsageFilter;
+
+  // Tag filter
+  tagFilter: string[];
+
   // Pagination state
   currentPage: number;
   hasMore: boolean;
@@ -61,6 +74,8 @@ interface SidebarContextType {
   setSidebarWidth: (width: number) => void;
   setThumbnailSize: (size: number) => void;
   setSortOrder: (order: SortOrder) => void;
+  setUsageFilter: (filter: UsageFilter) => void;
+  setTagFilter: (tags: string[]) => void;
   clearDirectory: () => void;
   setCurrentPage: (page: number) => void;
   setHasMore: (hasMore: boolean) => void;
@@ -79,6 +94,8 @@ const defaultContextValue: SidebarContextType = {
   sidebarWidth: 300, // Fallback value (actual value calculated in provider)
   thumbnailSize: 150,
   sortOrder: "desc",
+  usageFilter: "all",
+  tagFilter: [],
   currentPage: 1,
   hasMore: false,
   isLoading: false,
@@ -90,6 +107,8 @@ const defaultContextValue: SidebarContextType = {
   setSidebarWidth: () => {},
   setThumbnailSize: () => {},
   setSortOrder: () => {},
+  setUsageFilter: () => {},
+  setTagFilter: () => {},
   clearDirectory: () => {},
   setCurrentPage: () => {},
   setHasMore: () => {},
@@ -125,6 +144,8 @@ const STORAGE_KEYS = {
   SCROLL_POSITION: "scroll_position",
   HEADER_COLLAPSED: "sidebar_header_collapsed",
   SORT_ORDER: "sort_order",
+  USAGE_FILTER: "usage_filter",
+  TAG_FILTER: "tag_filter",
 };
 
 // Export storage keys for use in other components
@@ -207,6 +228,20 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
       (val) => val === "desc" || val === "asc"
     )
   );
+  const [usageFilter, setUsageFilterState] = useState<UsageFilter>(() =>
+    loadFromLocalStorage<UsageFilter>(
+      STORAGE_KEYS.USAGE_FILTER,
+      "all",
+      (val) => val === "all" || val === "used" || val === "unused"
+    )
+  );
+  const [tagFilter, setTagFilterState] = useState<string[]>(() =>
+    loadFromLocalStorage<string[]>(
+      STORAGE_KEYS.TAG_FILTER,
+      [],
+      (val) => Array.isArray(val) && val.every((v) => typeof v === "string")
+    )
+  );
   const [currentPage, setCurrentPageState] = useState<number>(1);
   const [hasMore, setHasMoreState] = useState<boolean>(false);
   const [isLoading, setIsLoadingState] = useState<boolean>(false);
@@ -255,6 +290,30 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
       console.error("Error persisting sort order:", error);
     }
   }, [sortOrder]);
+
+  // Persist usage filter to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.USAGE_FILTER,
+        JSON.stringify(usageFilter)
+      );
+    } catch (error) {
+      console.error("Error persisting usage filter:", error);
+    }
+  }, [usageFilter]);
+
+  // Persist tag filter to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.TAG_FILTER,
+        JSON.stringify(tagFilter)
+      );
+    } catch (error) {
+      console.error("Error persisting tag filter:", error);
+    }
+  }, [tagFilter]);
 
   // Persist selected album to localStorage
   useEffect(() => {
@@ -331,6 +390,20 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
   };
 
   /**
+   * Update usage filter
+   */
+  const setUsageFilter = (filter: UsageFilter) => {
+    setUsageFilterState(filter);
+  };
+
+  /**
+   * Update tag filter
+   */
+  const setTagFilter = (tags: string[]) => {
+    setTagFilterState(tags);
+  };
+
+  /**
    * Clear directory and reset all state
    */
   const clearDirectory = () => {
@@ -340,6 +413,7 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
     setHasMoreState(false);
     setIsLoadingState(false);
     setScrollPositionState(0);
+    setTagFilterState([]);
   };
 
   /**
@@ -391,6 +465,8 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
     sidebarWidth,
     thumbnailSize,
     sortOrder,
+    usageFilter,
+    tagFilter,
     currentPage,
     hasMore,
     isLoading,
@@ -402,6 +478,8 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
     setSidebarWidth,
     setThumbnailSize,
     setSortOrder,
+    setUsageFilter,
+    setTagFilter,
     clearDirectory,
     setCurrentPage,
     setHasMore,

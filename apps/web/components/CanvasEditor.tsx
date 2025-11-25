@@ -27,7 +27,9 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import Slot from "./Slot";
 import ImageLayer from "./ImageLayer";
+import { SlotEditorModal } from "./SlotEditorModal";
 import { applyTemperatureTintAttributes } from "@/lib/filters/temperatureTint";
+import "@/lib/filters/monochrome"; // Registers the Monochrome filter with Konva
 
 interface CanvasEditorProps {
   template: Template;
@@ -55,6 +57,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       height: PREVIEW_MIN_HEIGHT,
     });
     const [hoveredSlotId, setHoveredSlotId] = useState<string | null>(null);
+    const [slotEditorModalSlotId, setSlotEditorModalSlotId] = useState<string | null>(null);
 
     useEffect(() => {
       const updateCanvasSize = () => {
@@ -408,9 +411,44 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
           const slotWidth = (slot.width / 100) * CANVAS_WIDTH;
           const slotHeight = (slot.height / 100) * CANVAS_HEIGHT;
 
-          // Calculate image position and dimensions in canvas space
-          const imageWidth = image.width * assignment.scaleX;
-          const imageHeight = image.height * assignment.scaleY;
+          // Get crop values (stored as percentages 0-100 relative to image)
+          const hasCrop = 
+            assignment.cropX !== undefined && 
+            assignment.cropY !== undefined && 
+            assignment.cropWidth !== undefined && 
+            assignment.cropHeight !== undefined &&
+            (assignment.cropX !== 0 || assignment.cropY !== 0 || 
+             assignment.cropWidth !== 100 || assignment.cropHeight !== 100);
+          
+          const cropX = assignment.cropX ?? 0;
+          const cropY = assignment.cropY ?? 0;
+          const cropWidth = assignment.cropWidth ?? 100;
+          const cropHeight = assignment.cropHeight ?? 100;
+          
+          // Rotation angle in degrees
+          const rotation = assignment.rotation ?? 0;
+          const hasRotation = rotation !== 0;
+          
+          // Calculate crop in image pixels
+          const cropConfig = hasCrop ? {
+            x: (cropX / 100) * image.width,
+            y: (cropY / 100) * image.height,
+            width: (cropWidth / 100) * image.width,
+            height: (cropHeight / 100) * image.height,
+          } : null;
+          
+          // Calculate image dimensions - when cropped, use cropped dimensions
+          let displayWidth: number;
+          let displayHeight: number;
+          
+          if (hasCrop && cropConfig) {
+            displayWidth = cropConfig.width * assignment.scaleX;
+            displayHeight = cropConfig.height * assignment.scaleY;
+          } else {
+            displayWidth = image.width * assignment.scaleX;
+            displayHeight = image.height * assignment.scaleY;
+          }
+          
           const imageX = slotX + assignment.x;
           const imageY = slotY + assignment.y;
 
@@ -425,17 +463,41 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
           // Handle horizontal mirroring
           const mirrorX = assignment.mirrorX ?? false;
           const imageScaleX = mirrorX ? -1 : 1;
-          const imageOffsetX = mirrorX ? imageWidth : 0;
+          
+          // Calculate center point for rotation
+          const imageCenterX = displayWidth / 2;
+          const imageCenterY = displayHeight / 2;
+          
+          // Calculate offset for rotation
+          let offsetX = 0;
+          let offsetY = 0;
+          
+          if (hasRotation) {
+            offsetX = imageCenterX;
+            offsetY = imageCenterY;
+          }
+          
+          // For mirroring without rotation
+          if (mirrorX && !hasRotation) {
+            offsetX = displayWidth;
+          }
+          
+          // Adjust position when using offset for rotation
+          const adjustedImageX = hasRotation ? imageX + imageCenterX : imageX;
+          const adjustedImageY = hasRotation ? imageY + imageCenterY : imageY;
 
-          // Create image node
+          // Create image node with crop and rotation
           const konvaImage = new Konva.Image({
             image: image,
-            x: imageX,
-            y: imageY,
-            width: imageWidth,
-            height: imageHeight,
+            x: adjustedImageX,
+            y: adjustedImageY,
+            width: displayWidth,
+            height: displayHeight,
             scaleX: imageScaleX,
-            offsetX: imageOffsetX,
+            offsetX: offsetX,
+            offsetY: offsetY,
+            rotation: rotation,
+            crop: hasCrop && cropConfig ? cropConfig : undefined,
           });
 
           // Apply filters if any are set (respecting enabled flags)
@@ -485,11 +547,25 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
           if ((shouldApplyTemperature || shouldApplyTint) && temperatureTintFilter) {
             filters.push(temperatureTintFilter);
           }
+          
+          // Apply monochrome filter
+          const shouldApplyMonochrome = filtersEnabled && 
+            assignment.monochromeColor !== undefined && assignment.monochromeColor !== '';
+          const monochromeFilter =
+            (Konva.Filters as Record<string, typeof Konva.Filters[keyof typeof Konva.Filters]>).Monochrome;
+          if (shouldApplyMonochrome && monochromeFilter) {
+            filters.push(monochromeFilter);
+          }
 
           // Apply temperature and tint (only pass values if enabled)
           const tempValue = shouldApplyTemperature ? (assignment.temperature ?? 0) : 0;
           const tintValue = shouldApplyTint ? (assignment.tint ?? 0) : 0;
           applyTemperatureTintAttributes(konvaImage, tempValue, tintValue);
+          
+          // Apply monochrome color if enabled
+          if (shouldApplyMonochrome) {
+            konvaImage.setAttr('_monochromeColor', assignment.monochromeColor);
+          }
 
           if (filters.length > 0) {
             konvaImage.filters(filters);
@@ -585,6 +661,26 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       setSelectedSlotId(slotId);
     }, [setSelectedSlotId]);
 
+    const handleImageDoubleClick = useCallback((slotId: string) => {
+      if (imageAssignments.has(slotId)) {
+        setSlotEditorModalSlotId(slotId);
+      }
+    }, [imageAssignments]);
+
+    const handleSlotEditorUpdate = useCallback((slotId: string, updates: Partial<ImageAssignment>) => {
+      setImageAssignments((prev) => {
+        const newMap = new Map(prev);
+        const existingAssignment = newMap.get(slotId);
+        if (existingAssignment) {
+          newMap.set(slotId, {
+            ...existingAssignment,
+            ...updates,
+          });
+        }
+        return newMap;
+      });
+    }, [setImageAssignments]);
+
     const handleTransformUpdate = useCallback(
       (slotId: string) => {
         return (x: number, y: number) => {
@@ -650,80 +746,101 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       }
     }, [onExportReady, getCanvasDataUrl]);
 
+    // Get the slot and assignment for the editor modal
+    const editorModalSlot = slotEditorModalSlotId 
+      ? template.slots.find((s) => s.id === slotEditorModalSlotId) 
+      : null;
+    const editorModalAssignment = slotEditorModalSlotId 
+      ? imageAssignments.get(slotEditorModalSlotId) 
+      : null;
+
     return (
-      <div
-        ref={containerRef}
-        className="w-full h-full relative"
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-      >
-        <Stage
-          ref={stageRef}
-          width={canvasSize.width}
-          height={canvasSize.height}
-          style={{ backgroundColor: CANVAS_BACKGROUND_COLOR }}
-          onClick={handleStageClick}
+      <>
+        <div
+          ref={containerRef}
+          className="w-full h-full relative"
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
         >
-          <Layer ref={layerRef}>
-            {/* Render all slots for the selected template */}
-            {template.slots.map((slot) => (
-              <Slot
-                key={slot.id}
-                slot={slot}
-                scaleX={scaleX}
-                scaleY={scaleY}
-                isHovered={hoveredSlotId === slot.id}
-                onMouseEnter={() => handleSlotMouseEnter(slot.id)}
-                onMouseLeave={handleSlotMouseLeave}
-                onClick={handleSlotClick(slot.id)}
-              />
-            ))}
-            {/* Render assigned images */}
-            {imageAssignmentsArray.map(([slotId, assignment]) => {
-              const slot = template.slots.find((s) => s.id === slotId);
-              if (!slot) return null;
-              return (
-                <ImageLayer
-                  key={slotId}
-                  assignment={assignment}
+          <Stage
+            ref={stageRef}
+            width={canvasSize.width}
+            height={canvasSize.height}
+            style={{ backgroundColor: CANVAS_BACKGROUND_COLOR }}
+            onClick={handleStageClick}
+          >
+            <Layer ref={layerRef}>
+              {/* Render all slots for the selected template */}
+              {template.slots.map((slot) => (
+                <Slot
+                  key={slot.id}
                   slot={slot}
                   scaleX={scaleX}
                   scaleY={scaleY}
-                  isSelected={selectedSlotId === slotId}
-                  onSelect={() => handleImageSelect(slotId)}
-                  onTransformUpdate={handleTransformUpdate(slotId)}
-                  onScaleUpdate={handleScaleUpdate(slotId)}
-                  onMouseEnter={() => handleSlotMouseEnter(slotId)}
+                  isHovered={hoveredSlotId === slot.id}
+                  onMouseEnter={() => handleSlotMouseEnter(slot.id)}
                   onMouseLeave={handleSlotMouseLeave}
+                  onClick={handleSlotClick(slot.id)}
                 />
-              );
-            })}
-            {/* Render selection border on top of everything */}
-            {selectedSlotId && (() => {
-              const selectedSlot = template.slots.find((s) => s.id === selectedSlotId);
-              if (!selectedSlot) return null;
-              
-              const slotX = (selectedSlot.x / 100) * CANVAS_WIDTH * scaleX;
-              const slotY = (selectedSlot.y / 100) * CANVAS_HEIGHT * scaleY;
-              const slotWidth = (selectedSlot.width / 100) * CANVAS_WIDTH * scaleX;
-              const slotHeight = (selectedSlot.height / 100) * CANVAS_HEIGHT * scaleY;
-              
-              return (
-                <Rect
-                  x={slotX}
-                  y={slotY}
-                  width={slotWidth}
-                  height={slotHeight}
-                  stroke="#3b82f6"
-                  strokeWidth={3}
-                  fill="transparent"
-                  listening={false}
-                />
-              );
-            })()}
-          </Layer>
-        </Stage>
-      </div>
+              ))}
+              {/* Render assigned images */}
+              {imageAssignmentsArray.map(([slotId, assignment]) => {
+                const slot = template.slots.find((s) => s.id === slotId);
+                if (!slot) return null;
+                return (
+                  <ImageLayer
+                    key={slotId}
+                    assignment={assignment}
+                    slot={slot}
+                    scaleX={scaleX}
+                    scaleY={scaleY}
+                    isSelected={selectedSlotId === slotId}
+                    onSelect={() => handleImageSelect(slotId)}
+                    onDoubleClick={() => handleImageDoubleClick(slotId)}
+                    onTransformUpdate={handleTransformUpdate(slotId)}
+                    onScaleUpdate={handleScaleUpdate(slotId)}
+                    onMouseEnter={() => handleSlotMouseEnter(slotId)}
+                    onMouseLeave={handleSlotMouseLeave}
+                  />
+                );
+              })}
+              {/* Render selection border on top of everything */}
+              {selectedSlotId && (() => {
+                const selectedSlot = template.slots.find((s) => s.id === selectedSlotId);
+                if (!selectedSlot) return null;
+                
+                const slotX = (selectedSlot.x / 100) * CANVAS_WIDTH * scaleX;
+                const slotY = (selectedSlot.y / 100) * CANVAS_HEIGHT * scaleY;
+                const slotWidth = (selectedSlot.width / 100) * CANVAS_WIDTH * scaleX;
+                const slotHeight = (selectedSlot.height / 100) * CANVAS_HEIGHT * scaleY;
+                
+                return (
+                  <Rect
+                    x={slotX}
+                    y={slotY}
+                    width={slotWidth}
+                    height={slotHeight}
+                    stroke="#3b82f6"
+                    strokeWidth={3}
+                    fill="transparent"
+                    listening={false}
+                  />
+                );
+              })()}
+            </Layer>
+          </Stage>
+        </div>
+
+        {/* Slot Editor Modal */}
+        {slotEditorModalSlotId && editorModalSlot && editorModalAssignment && (
+          <SlotEditorModal
+            assignment={editorModalAssignment}
+            slot={editorModalSlot}
+            onUpdate={(updates) => handleSlotEditorUpdate(slotEditorModalSlotId, updates)}
+            onClose={() => setSlotEditorModalSlotId(null)}
+          />
+        )}
+      </>
     );
   }
 );

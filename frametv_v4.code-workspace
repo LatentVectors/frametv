@@ -4,9 +4,6 @@
 			"path": "."
 		},
 		{
-			"path": "apps/tvtest"
-		},
-		{
 			"path": "apps/database-service"
 		},
 		{

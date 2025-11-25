@@ -177,7 +177,12 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
           }}
         >
           {images.map((image) => (
-            <ImageThumbnail key={image.path} image={image} size={thumbnailSize} />
+            <ImageThumbnail 
+              key={image.path} 
+              image={image} 
+              size={thumbnailSize} 
+              sourceImageId={image.sourceImageId}
+            />
           ))}
         </div>
 

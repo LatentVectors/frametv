@@ -37,6 +37,15 @@ export interface ImageAssignment {
   hueEnabled?: boolean; // Individual toggle (default: true)
   temperatureEnabled?: boolean; // Individual toggle (default: true)
   tintEnabled?: boolean; // Individual toggle (default: true)
+  // Crop fields - relative to original image dimensions
+  cropX?: number;
+  cropY?: number;
+  cropWidth?: number;
+  cropHeight?: number;
+  // Rotation for crop tool (supports arbitrary angles with decimal precision)
+  rotation?: number; // Rotation angle in degrees
+  // Filter presets
+  monochromeColor?: string; // Color for monochrome filter preset
 }
 
 /**
@@ -47,4 +56,10 @@ export interface Template {
   name: string;
   slots: Slot[];
 }
+
+import { components } from "./database-api";
+
+export type Tag = components["schemas"]["Tag"];
+export type GalleryImage = components["schemas"]["GalleryImage"];
+export type SourceImage = components["schemas"]["SourceImage"];
 

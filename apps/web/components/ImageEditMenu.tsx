@@ -53,8 +53,9 @@ const TemperatureIcon = () => (
 
 const TintIcon = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="8" cy="8" r="6" fill="#ec4899" />
-    <path d="M8 2 A 6 6 0 0 1 8 14 Z" fill="#10b981" />
+    {/* Green on left (negative), Magenta on right (positive) - matches Photoshop convention */}
+    <circle cx="8" cy="8" r="6" fill="#10b981" />
+    <path d="M8 2 A 6 6 0 0 1 8 14 Z" fill="#ec4899" />
   </svg>
 );
 

@@ -3,6 +3,8 @@
  * Types are auto-generated from OpenAPI spec.
  */
 
+import { Tag } from "@/types";
+
 const DATABASE_SERVICE_URL =
   process.env.NEXT_PUBLIC_DATABASE_SERVICE_URL || "http://localhost:8001";
 
@@ -27,18 +29,64 @@ async function apiFetch<T>(
     throw new Error(error.detail || `API error: ${response.statusText}`);
   }
 
+  // Handle 204 No Content responses
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return response.json();
+}
+
+/**
+ * Source image response type
+ */
+export interface SourceImageResponse {
+  id: number;
+  filename: string;
+  filepath: string;
+  date_taken: string | null;
+  is_deleted: boolean;
+  usage_count: number;
+  is_used: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Paginated source images response
+ */
+export interface PaginatedSourceImages {
+  items: SourceImageResponse[];
+  total: number;
+  page: number;
+  pages: number;
 }
 
 /**
  * Source Images API
  */
 export const sourceImagesApi = {
-  list: async (page: number = 1, limit: number = 50) => {
-    return apiFetch(`/source-images?page=${page}&limit=${limit}`);
+  list: async (params: {
+    page?: number;
+    limit?: number;
+    album?: string;
+    sortOrder?: "asc" | "desc";
+    sortBy?: "date_taken" | "filename" | "created_at";
+    used?: boolean;
+    tags?: string;
+  } = {}): Promise<PaginatedSourceImages> => {
+    const searchParams = new URLSearchParams();
+    searchParams.set("page", String(params.page ?? 1));
+    searchParams.set("limit", String(params.limit ?? 50));
+    if (params.album) searchParams.set("album", params.album);
+    if (params.sortOrder) searchParams.set("sort_order", params.sortOrder);
+    if (params.sortBy) searchParams.set("sort_by", params.sortBy);
+    if (params.used !== undefined) searchParams.set("used", String(params.used));
+    if (params.tags) searchParams.set("tags", params.tags);
+    return apiFetch<PaginatedSourceImages>(`/source-images?${searchParams.toString()}`);
   },
-  get: async (id: number) => {
-    return apiFetch(`/source-images/${id}`);
+  get: async (id: number): Promise<SourceImageResponse> => {
+    return apiFetch<SourceImageResponse>(`/source-images/${id}`);
   },
   create: async (data: any) => {
     return apiFetch(`/source-images`, {
@@ -57,14 +105,41 @@ export const sourceImagesApi = {
       method: "POST",
     });
   },
+  recalculateUsageCounts: async () => {
+    return apiFetch<{ success: boolean; total_images: number; updated_count: number; negative_counts_corrected: number }>(
+      `/source-images/recalculate-usage`,
+      { method: "POST" }
+    );
+  },
+  // Tag methods
+  getTags: async (id: number): Promise<Tag[]> => {
+    return apiFetch(`/source-images/${id}/tags`);
+  },
+  addTag: async (id: number, tagName: string, tagColor?: string): Promise<Tag> => {
+    return apiFetch(`/source-images/${id}/tags`, {
+      method: "POST",
+      body: JSON.stringify({ tag_name: tagName, tag_color: tagColor }),
+    });
+  },
+  removeTag: async (id: number, tagId: number): Promise<void> => {
+    return apiFetch(`/source-images/${id}/tags/${tagId}`, {
+      method: "DELETE",
+    });
+  },
+  // Thumbnail URL helper
+  getThumbnailUrl: (id: number): string => {
+    return `/api/source-images/thumbnail?id=${id}`;
+  },
 };
 
 /**
  * Gallery Images API
  */
 export const galleryImagesApi = {
-  list: async (page: number = 1, limit: number = 50) => {
-    return apiFetch(`/gallery-images?page=${page}&limit=${limit}`);
+  list: async (page: number = 1, limit: number = 50, options?: { tags?: string }) => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (options?.tags) params.set("tags", options.tags);
+    return apiFetch(`/gallery-images?${params.toString()}`);
   },
   get: async (id: number) => {
     return apiFetch(`/gallery-images/${id}`);
@@ -83,6 +158,21 @@ export const galleryImagesApi = {
   },
   delete: async (id: number) => {
     return apiFetch(`/gallery-images/${id}`, {
+      method: "DELETE",
+    });
+  },
+  // Tag methods
+  getTags: async (id: number): Promise<Tag[]> => {
+    return apiFetch(`/gallery-images/${id}/tags`);
+  },
+  addTag: async (id: number, tagName: string, tagColor?: string): Promise<Tag> => {
+    return apiFetch(`/gallery-images/${id}/tags`, {
+      method: "POST",
+      body: JSON.stringify({ tag_name: tagName, tag_color: tagColor }),
+    });
+  },
+  removeTag: async (id: number, tagId: number): Promise<void> => {
+    return apiFetch(`/gallery-images/${id}/tags/${tagId}`, {
       method: "DELETE",
     });
   },
@@ -142,6 +232,31 @@ export const settingsApi = {
     return apiFetch(`/settings/${key}`, {
       method: "PUT",
       body: JSON.stringify({ value }),
+    });
+  },
+};
+
+/**
+ * Tags API
+ */
+export const tagsApi = {
+  list: async (search?: string): Promise<Tag[]> => {
+    const params = search ? `?search=${encodeURIComponent(search)}` : "";
+    return apiFetch(`/tags${params}`);
+  },
+  get: async (id: number): Promise<Tag> => {
+    return apiFetch(`/tags/${id}`);
+  },
+  create: async (name: string, color?: string): Promise<Tag> => {
+    return apiFetch(`/tags`, {
+      method: "POST",
+      body: JSON.stringify({ name, color }),
+    });
+  },
+  update: async (id: number, data: { name?: string; color?: string }): Promise<Tag> => {
+    return apiFetch(`/tags/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
     });
   },
 };
