@@ -16,6 +16,7 @@ router = APIRouter(prefix="/source-images", tags=["source-images"])
 
 class SourceImageResponse(BaseModel):
     """Source image response model with computed is_used field."""
+
     id: Optional[int] = None
     filename: str
     filepath: str
@@ -29,6 +30,7 @@ class SourceImageResponse(BaseModel):
 
 class PaginatedResponse(BaseModel):
     """Paginated response model."""
+
     items: List[SourceImageResponse]
     total: int
     page: int
@@ -37,6 +39,7 @@ class PaginatedResponse(BaseModel):
 
 class RecalculateUsageResponse(BaseModel):
     """Response model for usage count recalculation."""
+
     success: bool
     total_images: int
     updated_count: int
@@ -47,91 +50,122 @@ class RecalculateUsageResponse(BaseModel):
 async def list_source_images(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
-    used: Optional[bool] = Query(None, description="Filter by usage status (true=used, false=unused, null=all)"),
-    tags: Optional[str] = Query(None, description="Comma-separated list of tag names to filter by"),
-    album: Optional[str] = Query(None, description="Filter by album name (matches filepath starting with albums/{album}/)"),
-    sort_by: Optional[str] = Query("date_taken", description="Field to sort by: date_taken (default), filename, created_at"),
-    sort_order: Optional[str] = Query("desc", description="Sort direction: desc (default), asc"),
+    used: Optional[bool] = Query(
+        None, description="Filter by usage status (true=used, false=unused, null=all)"
+    ),
+    tags: Optional[str] = Query(
+        None, description="Comma-separated list of tag names to filter by"
+    ),
+    album: Optional[str] = Query(
+        None,
+        description="Filter by album name (matches filepath starting with albums/{album}/)",
+    ),
+    sort_by: Optional[str] = Query(
+        "date_taken",
+        description="Field to sort by: date_taken (default), filename, created_at",
+    ),
+    sort_order: Optional[str] = Query(
+        "desc", description="Sort direction: desc (default), asc"
+    ),
     session: Session = Depends(get_session),
 ):
     """List source images with pagination and optional filtering."""
-    repo = SourceImageRepository(session)
-    skip = (page - 1) * limit
-    
-    # Build filepath prefix for album filtering
-    filepath_prefix = f"albums/{album}/" if album else None
-    
-    # Validate sort_by and sort_order
-    valid_sort_fields = ["date_taken", "filename", "created_at"]
-    if sort_by not in valid_sort_fields:
-        sort_by = "date_taken"
-    if sort_order not in ["asc", "desc"]:
-        sort_order = "desc"
-    
-    # Handle tag filtering
-    source_image_ids = None
-    if tags:
-        tag_names = [t.strip() for t in tags.split(",") if t.strip()]
-        if tag_names:
-            tag_repo = TagRepository(session)
-            tag_objs = []
-            for name in tag_names:
-                tag = tag_repo.get_by_name(name)
-                if tag:
-                    tag_objs.append(tag)
-            
-            if tag_objs:
-                tag_ids = [t.id for t in tag_objs]
-                source_tag_repo = SourceImageTagRepository(session)
-                source_image_ids = source_tag_repo.get_source_image_ids_with_all_tags(tag_ids)
-                
-                # If no images match the tags, return empty
-                if not source_image_ids:
-                    return PaginatedResponse(
-                        items=[],
-                        total=0,
-                        page=page,
-                        pages=1,
-                    )
-    
-    items = repo.get_all_not_deleted_filtered(
-        skip=skip, 
-        limit=limit, 
-        used=used, 
-        source_image_ids=source_image_ids,
-        filepath_prefix=filepath_prefix,
-        order_by=sort_by,
-        order_direction=sort_order,
-    )
-    total = repo.count_not_deleted_filtered(
-        used=used, 
-        source_image_ids=source_image_ids,
-        filepath_prefix=filepath_prefix,
-    )
-    pages = (total + limit - 1) // limit if total > 0 else 1
-    
-    # Convert to response model with is_used computed
-    response_items = [
-        SourceImageResponse(
-            id=item.id,
-            filename=item.filename,
-            filepath=item.filepath,
-            date_taken=item.date_taken.isoformat() if item.date_taken else None,
-            is_deleted=item.is_deleted,
-            usage_count=item.usage_count,
-            is_used=item.is_used,
-            created_at=item.created_at.isoformat(),
-            updated_at=item.updated_at.isoformat(),
+    import logging
+    import traceback
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        repo = SourceImageRepository(session)
+        skip = (page - 1) * limit
+
+        # Build filepath prefix for album filtering
+        filepath_prefix = f"albums/{album}/" if album else None
+
+        logger.info(
+            f"[source-images] Listing images: page={page}, limit={limit}, album={album}, sort_by={sort_by}, sort_order={sort_order}"
         )
-        for item in items
-    ]
-    
-    return PaginatedResponse(
-        items=response_items,
-        total=total,
-        page=page,
-        pages=pages,
-    )
+
+        # Validate sort_by and sort_order
+        valid_sort_fields = ["date_taken", "filename", "created_at"]
+        if sort_by not in valid_sort_fields:
+            sort_by = "date_taken"
+        if sort_order not in ["asc", "desc"]:
+            sort_order = "desc"
+
+        # Handle tag filtering
+        source_image_ids = None
+        if tags:
+            tag_names = [t.strip() for t in tags.split(",") if t.strip()]
+            if tag_names:
+                tag_repo = TagRepository(session)
+                tag_objs = []
+                for name in tag_names:
+                    tag = tag_repo.get_by_name(name)
+                    if tag:
+                        tag_objs.append(tag)
+
+                if tag_objs:
+                    tag_ids = [t.id for t in tag_objs]
+                    source_tag_repo = SourceImageTagRepository(session)
+                    source_image_ids = (
+                        source_tag_repo.get_source_image_ids_with_all_tags(tag_ids)
+                    )
+
+                    # If no images match the tags, return empty
+                    if not source_image_ids:
+                        return PaginatedResponse(
+                            items=[],
+                            total=0,
+                            page=page,
+                            pages=1,
+                        )
+
+        items = repo.get_all_not_deleted_filtered(
+            skip=skip,
+            limit=limit,
+            used=used,
+            source_image_ids=source_image_ids,
+            filepath_prefix=filepath_prefix,
+            order_by=sort_by,
+            order_direction=sort_order,
+        )
+
+        logger.info(f"[source-images] Found {len(items)} items")
+
+        total = repo.count_not_deleted_filtered(
+            used=used,
+            source_image_ids=source_image_ids,
+            filepath_prefix=filepath_prefix,
+        )
+        pages = (total + limit - 1) // limit if total > 0 else 1
+
+        # Convert to response model with is_used computed
+        response_items = [
+            SourceImageResponse(
+                id=item.id,
+                filename=item.filename,
+                filepath=item.filepath,
+                date_taken=item.date_taken.isoformat() if item.date_taken else None,
+                is_deleted=item.is_deleted,
+                usage_count=item.usage_count,
+                is_used=item.is_used,
+                created_at=item.created_at.isoformat() if item.created_at else "",
+                updated_at=item.updated_at.isoformat() if item.updated_at else "",
+            )
+            for item in items
+        ]
+
+        return PaginatedResponse(
+            items=response_items,
+            total=total,
+            page=page,
+            pages=pages,
+        )
+    except Exception as e:
+        logger.error(f"[source-images] Error listing images: {e}")
+        logger.error(f"[source-images] Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{id}", response_model=SourceImageResponse)
@@ -144,7 +178,7 @@ async def get_source_image(
     image = repo.get(id)
     if not image:
         raise HTTPException(status_code=404, detail="Source image not found")
-    
+
     return SourceImageResponse(
         id=image.id,
         filename=image.filename,
@@ -187,11 +221,11 @@ async def update_source_image(
     existing = repo.get(id)
     if not existing:
         raise HTTPException(status_code=404, detail="Source image not found")
-    
+
     # Update fields (excluding usage_count which is managed internally)
     for field, value in image.model_dump(exclude={"id", "usage_count"}).items():
         setattr(existing, field, value)
-    
+
     return repo.update(existing)
 
 
@@ -202,7 +236,7 @@ async def recalculate_usage_counts(
     """Recalculate all usage counts from actual ImageSlot references."""
     repo = SourceImageRepository(session)
     result = repo.recalculate_all_usage_counts()
-    
+
     return RecalculateUsageResponse(
         success=True,
         total_images=result["total_images"],
@@ -222,13 +256,14 @@ async def get_source_image_tags(
     image = repo.get(id)
     if not image:
         raise HTTPException(status_code=404, detail="Source image not found")
-    
+
     tag_repo = SourceImageTagRepository(session)
     return tag_repo.get_tags_for_source_image(id)
 
 
 class AddTagRequest(BaseModel):
     """Request model for adding a tag."""
+
     tag_name: str
     tag_color: Optional[str] = None
 
@@ -244,15 +279,15 @@ async def add_tag_to_source_image(
     image = repo.get(id)
     if not image:
         raise HTTPException(status_code=404, detail="Source image not found")
-    
+
     # Get or create tag
     tag_repo = TagRepository(session)
     tag = tag_repo.get_or_create(request.tag_name, request.tag_color)
-    
+
     # Add tag to source image
     source_tag_repo = SourceImageTagRepository(session)
     source_tag_repo.add_tag_to_source_image(id, tag.id)
-    
+
     return tag
 
 
@@ -267,8 +302,9 @@ async def remove_tag_from_source_image(
     image = repo.get(id)
     if not image:
         raise HTTPException(status_code=404, detail="Source image not found")
-    
+
     source_tag_repo = SourceImageTagRepository(session)
     if not source_tag_repo.remove_tag_from_source_image(id, tag_id):
-        raise HTTPException(status_code=404, detail="Tag not found on this source image")
-
+        raise HTTPException(
+            status_code=404, detail="Tag not found on this source image"
+        )

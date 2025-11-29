@@ -131,10 +131,23 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
   const slotAspectRatio = slot.width / slot.height;
 
   // Determine active preset based on current values
+  // Presets are exclusive and only active if values match exactly
   const getActivePreset = useCallback((): FilterPreset => {
-    if (localState.monochromeColor) return 'monochrome';
-    if (localState.saturation === -100 && !localState.monochromeColor) return 'blackWhite';
-    if (localState.temperature === 30 && localState.saturation === -50 && localState.brightness === 10) return 'sepia';
+    // Check for Monochrome preset (has monochromeColor and saturation is 0)
+    if (localState.monochromeColor && localState.saturation === 0 && 
+        localState.temperature === 0 && localState.brightness === 0) {
+      return 'monochrome';
+    }
+    // Check for Black & White preset (exact values: saturation -100, no monochromeColor, other values reset)
+    if (localState.saturation === -100 && !localState.monochromeColor && 
+        localState.temperature === 0 && localState.brightness === 0) {
+      return 'blackWhite';
+    }
+    // Check for Sepia preset (exact values: temperature 30, saturation -50, brightness 10, no monochromeColor)
+    if (localState.temperature === 30 && localState.saturation === -50 && 
+        localState.brightness === 10 && !localState.monochromeColor) {
+      return 'sepia';
+    }
     return 'none';
   }, [localState.monochromeColor, localState.saturation, localState.temperature, localState.brightness]);
 
@@ -413,35 +426,53 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
     setZoom(prev => Math.max(0.5, Math.min(3, prev + delta)));
   }, []);
 
-  // Preset handlers
+  // Preset handlers - exclusive toggle behavior
   const handleBlackWhitePreset = () => {
-    setLocalState(prev => ({
-      ...prev,
-      saturation: -100,
-      temperature: 0,
-      brightness: 0,
-      monochromeColor: undefined,
-    }));
+    if (activePreset === 'blackWhite') {
+      // If already active, clear the preset
+      handleClearPreset();
+    } else {
+      // Activate Black & White: sets saturation to -100, clears other preset values
+      setLocalState(prev => ({
+        ...prev,
+        saturation: -100,
+        temperature: 0,
+        brightness: 0,
+        monochromeColor: undefined,
+      }));
+    }
   };
 
   const handleSepiaPreset = () => {
-    setLocalState(prev => ({
-      ...prev,
-      temperature: 30,
-      saturation: -50,
-      brightness: 10,
-      monochromeColor: undefined,
-    }));
+    if (activePreset === 'sepia') {
+      // If already active, clear the preset
+      handleClearPreset();
+    } else {
+      // Activate Sepia: sets temperature, saturation, brightness
+      setLocalState(prev => ({
+        ...prev,
+        temperature: 30,
+        saturation: -50,
+        brightness: 10,
+        monochromeColor: undefined,
+      }));
+    }
   };
 
   const handleMonochromePreset = (color: string) => {
-    setLocalState(prev => ({
-      ...prev,
-      saturation: 0,
-      temperature: 0,
-      brightness: 0,
-      monochromeColor: color,
-    }));
+    if (activePreset === 'monochrome' && localState.monochromeColor === color) {
+      // If same color is already active, clear the preset
+      handleClearPreset();
+    } else {
+      // Activate Monochrome with the chosen color, reset saturation and other preset values
+      setLocalState(prev => ({
+        ...prev,
+        saturation: 0,
+        temperature: 0,
+        brightness: 0,
+        monochromeColor: color,
+      }));
+    }
   };
 
   const handleClearPreset = () => {
@@ -454,9 +485,9 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
     }));
   };
 
-  // Reset all
+  // Reset all - clears all adjustments, rotation, mirror, and active preset
   const handleResetAll = () => {
-    setLocalState({
+    setLocalState(prev => ({
       brightness: 0,
       contrast: 0,
       saturation: 0,
@@ -466,11 +497,11 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
       mirrorX: false,
       rotation: 0,
       monochromeColor: undefined,
-      cropX: localState.cropX, // Keep crop
-      cropY: localState.cropY,
-      cropWidth: localState.cropWidth,
-      cropHeight: localState.cropHeight,
-    });
+      cropX: prev.cropX, // Keep crop
+      cropY: prev.cropY,
+      cropWidth: prev.cropWidth,
+      cropHeight: prev.cropHeight,
+    }));
   };
 
   // Save
@@ -502,30 +533,40 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  const hasChanges = localState.brightness !== 0 || localState.contrast !== 0 || 
-    localState.saturation !== 0 || localState.hue !== 0 || localState.temperature !== 0 || 
-    localState.tint !== 0 || localState.mirrorX || localState.rotation !== 0 || 
-    localState.monochromeColor !== undefined;
+  // Check if there are any changes from original state
+  const hasChanges = 
+    localState.brightness !== (assignment.brightness ?? 0) ||
+    localState.contrast !== (assignment.contrast ?? 0) ||
+    localState.saturation !== (assignment.saturation ?? 0) ||
+    localState.hue !== (assignment.hue ?? 0) ||
+    localState.temperature !== (assignment.temperature ?? 0) ||
+    localState.tint !== (assignment.tint ?? 0) ||
+    localState.mirrorX !== (assignment.mirrorX ?? false) ||
+    localState.rotation !== (assignment.rotation ?? 0) ||
+    localState.monochromeColor !== assignment.monochromeColor ||
+    localState.cropX !== (assignment.cropX ?? 0) ||
+    localState.cropY !== (assignment.cropY ?? 0) ||
+    localState.cropWidth !== (assignment.cropWidth ?? 100) ||
+    localState.cropHeight !== (assignment.cropHeight ?? 100);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/90 flex flex-col">
-        {/* Header */}
+      {/* Minimal Header - Cancel (left) and Save (right) only */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-border/50 bg-background/50 backdrop-blur-sm">
         <Button variant="ghost" onClick={onClose}>
-              Cancel
-            </Button>
-        <h2 className="text-lg font-semibold text-foreground">Edit Image</h2>
+          Cancel
+        </Button>
         <Button onClick={handleSave}>
           Save
-            </Button>
-          </div>
+        </Button>
+      </div>
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar */}
+        {/* Left Sidebar - Fixed width ~320px */}
         <div className="w-80 bg-background/80 backdrop-blur-sm border-r border-border/50 overflow-y-auto">
           <div className="p-4 space-y-6">
-            {/* Mirror/Flip */}
+            {/* Mirror/Flip - Icon-only button at top */}
             <div>
               <Button
                 variant={localState.mirrorX ? "default" : "outline"}
@@ -536,21 +577,21 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
               >
                 <FlipHorizontal className="h-5 w-5" />
               </Button>
-        </div>
+            </div>
 
-            {/* Filter Presets */}
+            {/* Filter Presets - Exclusive toggle behavior */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Filter Presets</label>
               <div className="flex flex-wrap gap-2">
-            <Button
+                <Button
                   variant={activePreset === 'blackWhite' ? "default" : "outline"}
-              size="sm"
+                  size="sm"
                   onClick={handleBlackWhitePreset}
                   className="h-8 text-xs"
-            >
+                >
                   Black & White
-            </Button>
-            <Button
+                </Button>
+                <Button
                   variant={activePreset === 'sepia' ? "default" : "outline"}
                   size="sm"
                   onClick={handleSepiaPreset}
@@ -566,27 +607,31 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
                       if (activePreset === 'monochrome') {
                         handleClearPreset();
                       } else {
-                        handleMonochromePreset('#3b82f6');
+                        handleMonochromePreset(localState.monochromeColor || '#3b82f6');
                       }
                     }}
                     className="h-8 text-xs"
                   >
                     Monochrome
                   </Button>
+                  {/* Always-visible color swatch for Monochrome */}
                   <Popover>
                     <PopoverTrigger asChild>
                       <button
-                        className={`w-8 h-8 rounded border-2 flex items-center justify-center ${
-                          activePreset === 'monochrome' ? 'border-foreground' : 'border-muted opacity-50'
+                        className={`w-8 h-8 rounded border-2 flex items-center justify-center transition-opacity ${
+                          activePreset === 'monochrome' 
+                            ? 'border-foreground opacity-100' 
+                            : 'border-muted opacity-50 hover:opacity-75'
                         }`}
                         style={{ backgroundColor: localState.monochromeColor || '#3b82f6' }}
+                        title="Select Monochrome Color"
                       >
                         <Palette className="h-4 w-4 text-white drop-shadow" />
                       </button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-3" align="start">
                       <div className="space-y-2">
-                        <label className="text-xs font-medium">Select Color</label>
+                        <label className="text-xs font-medium">Select Monochrome Color</label>
                         <div className="grid grid-cols-6 gap-1">
                           {MONOCHROME_COLORS.map((color) => (
                             <button
@@ -609,20 +654,10 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
                     </PopoverContent>
                   </Popover>
                 </div>
-                {activePreset !== 'none' && (
-                  <Button
-                    variant="ghost"
-              size="sm"
-                    onClick={handleClearPreset}
-                    className="h-8 text-xs"
-            >
-                    Clear
-            </Button>
-                )}
               </div>
           </div>
           
-            {/* Detailed Adjustments */}
+            {/* Detailed Adjustments - Brightness, Contrast, Saturation, Hue, Temperature, Tint */}
             <div className="space-y-3">
               <label className="text-sm font-medium text-foreground">Adjustments</label>
               
@@ -681,14 +716,14 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
               />
             </div>
 
-            {/* Rotation */}
+            {/* Rotation - Slider + numeric input (range -180.0 to 180.0, step 0.1) */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Rotation</label>
-          <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <div className="w-6 h-6 flex items-center justify-center">
                   <RotationIcon />
                 </div>
-            <Slider
+                <Slider
                   value={[localState.rotation]}
                   onValueChange={([v]) => setLocalState(prev => ({ ...prev, rotation: v }))}
                   min={-180}
@@ -705,7 +740,7 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
                   }}
                   min={-180}
                   max={180}
-              step={0.1}
+                  step={0.1}
                   className="w-16 h-8 text-xs text-center"
                 />
                 <span className="text-xs text-muted-foreground">°</span>
@@ -728,7 +763,7 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
           </div>
         </div>
 
-        {/* Canvas Area */}
+        {/* Main Area - Canvas filling remaining space */}
         <div 
           ref={containerRef}
           className="flex-1 flex items-center justify-center p-5 bg-black/50"
@@ -744,14 +779,7 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
             onMouseLeave={handleMouseUp}
             onWheel={handleWheel}
           />
-          </div>
         </div>
-
-      {/* Bottom hint */}
-      <div className="px-6 py-2 bg-background/30 text-center">
-        <span className="text-xs text-muted-foreground">
-          Drag corners to resize crop • Drag inside to move crop • Scroll to zoom • Drag outside crop to pan
-        </span>
       </div>
     </div>
   );

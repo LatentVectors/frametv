@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 import sharp from "sharp";
-import { getAlbumsDirectory, getSavedImagesDirectory } from "@/lib/dataUtils";
+import { getAlbumsDirectory, getSavedImagesDirectory, getDataDirectory } from "@/lib/dataUtils";
 
 function isPathInsideDirectory(directory: string, targetPath: string): boolean {
   const relativePath = path.relative(directory, targetPath);
@@ -36,7 +36,19 @@ export async function GET(request: NextRequest) {
       filepath = path.join(savedImagesDir, safeFilename);
     } else {
       // directPath is validated to exist because of earlier guard
-      const resolvedPath = path.resolve(directPath!);
+      // The path can be:
+      // 1. An absolute path (starts with /)
+      // 2. A relative path from the data directory (e.g., "albums/..." or "saved-images/...")
+      let resolvedPath: string;
+      
+      if (path.isAbsolute(directPath!)) {
+        resolvedPath = directPath!;
+      } else {
+        // Resolve relative paths against the data directory
+        const dataDir = getDataDirectory();
+        resolvedPath = path.resolve(dataDir, directPath!);
+      }
+      
       const isAllowedPath =
         isPathInsideDirectory(savedImagesDir, resolvedPath) ||
         isPathInsideDirectory(albumsDir, resolvedPath);

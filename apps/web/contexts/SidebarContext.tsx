@@ -5,21 +5,16 @@ import React, {
   useContext,
   useState,
   useEffect,
+  useCallback,
+  useMemo,
   ReactNode,
 } from "react";
+import { SourceImageResponse } from "@/lib/api/database";
 
 /**
- * Image data structure returned from the backend API
+ * Image data structure from database API (SourceImageResponse)
  */
-export interface ImageData {
-  filename: string;
-  path: string;
-  size: number;
-  modifiedDate: string;
-  thumbnailDataUrl: string;
-  isUsed?: boolean; // Whether this image is used in any saved GalleryImage
-  sourceImageId?: number; // Database ID for the source image (if available)
-}
+export type ImageData = SourceImageResponse;
 
 /**
  * Usage filter options for sidebar
@@ -346,67 +341,67 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
   /**
    * Set the selected album name
    */
-  const setDirectory = (albumName: string) => {
+  const setDirectory = useCallback((albumName: string) => {
     setDirectoryPathState(albumName);
-  };
+  }, []);
 
   /**
    * Replace all images with new array
    */
-  const setImages = (newImages: ImageData[]) => {
+  const setImages = useCallback((newImages: ImageData[]) => {
     setImagesState(newImages);
-  };
+  }, []);
 
   /**
    * Add new images to the existing array (for pagination)
    */
-  const addImages = (newImages: ImageData[]) => {
+  const addImages = useCallback((newImages: ImageData[]) => {
     setImagesState((prev) => [...prev, ...newImages]);
-  };
+  }, []);
 
   /**
    * Update sidebar width
    */
-  const setSidebarWidth = (width: number) => {
+  const setSidebarWidth = useCallback((width: number) => {
     // Enforce constraints (max 800 to allow 2 columns at 300px thumbnails)
     const constrainedWidth = Math.max(200, Math.min(800, width));
     setSidebarWidthState(constrainedWidth);
-  };
+  }, []);
 
   /**
    * Update thumbnail size
    */
-  const setThumbnailSize = (size: number) => {
+  const setThumbnailSize = useCallback((size: number) => {
     // Enforce constraints (80-300px)
     const constrainedSize = Math.max(80, Math.min(300, size));
     setThumbnailSizeState(constrainedSize);
-  };
+  }, []);
 
   /**
    * Update sort order
    */
-  const setSortOrder = (order: SortOrder) => {
+  const setSortOrder = useCallback((order: SortOrder) => {
     setSortOrderState(order);
-  };
+  }, []);
 
   /**
    * Update usage filter
    */
-  const setUsageFilter = (filter: UsageFilter) => {
+  const setUsageFilter = useCallback((filter: UsageFilter) => {
     setUsageFilterState(filter);
-  };
+  }, []);
 
   /**
    * Update tag filter
    */
-  const setTagFilter = (tags: string[]) => {
+  const setTagFilter = useCallback((tags: string[]) => {
     setTagFilterState(tags);
-  };
+  }, []);
 
   /**
    * Clear directory and reset all state
    */
-  const clearDirectory = () => {
+  const clearDirectory = useCallback(() => {
     setDirectoryPathState(null);
     setImagesState([]);
     setCurrentPageState(1);
@@ -414,80 +409,111 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
     setIsLoadingState(false);
     setScrollPositionState(0);
     setTagFilterState([]);
-  };
+  }, []);
 
   /**
    * Update current page number
    */
-  const setCurrentPage = (page: number) => {
+  const setCurrentPage = useCallback((page: number) => {
     setCurrentPageState(page);
-  };
+  }, []);
 
   /**
    * Update hasMore flag
    */
-  const setHasMore = (hasMore: boolean) => {
+  const setHasMore = useCallback((hasMore: boolean) => {
     setHasMoreState(hasMore);
-  };
+  }, []);
 
   /**
    * Update loading state
    */
-  const setIsLoading = (isLoading: boolean) => {
+  const setIsLoading = useCallback((isLoading: boolean) => {
     setIsLoadingState(isLoading);
-  };
+  }, []);
 
   /**
    * Update scroll position
    */
-  const setScrollPosition = (position: number) => {
+  const setScrollPosition = useCallback((position: number) => {
     setScrollPositionState(position);
-  };
+  }, []);
 
   /**
    * Open image modal with selected image
    */
-  const openImageModal = (image: ImageData) => {
+  const openImageModal = useCallback((image: ImageData) => {
     setSelectedImageForModal(image);
-  };
+  }, []);
 
   /**
    * Close image modal
    */
-  const closeImageModal = () => {
+  const closeImageModal = useCallback(() => {
     setSelectedImageForModal(null);
-  };
+  }, []);
 
-  // Context value
-  const value: SidebarContextType = {
-    directoryPath,
-    images,
-    sidebarWidth,
-    thumbnailSize,
-    sortOrder,
-    usageFilter,
-    tagFilter,
-    currentPage,
-    hasMore,
-    isLoading,
-    scrollPosition,
-    selectedImageForModal,
-    setDirectory,
-    setImages,
-    addImages,
-    setSidebarWidth,
-    setThumbnailSize,
-    setSortOrder,
-    setUsageFilter,
-    setTagFilter,
-    clearDirectory,
-    setCurrentPage,
-    setHasMore,
-    setIsLoading,
-    setScrollPosition,
-    openImageModal,
-    closeImageModal,
-  };
+  // Context value - memoized to prevent unnecessary re-renders
+  const value: SidebarContextType = useMemo(
+    () => ({
+      directoryPath,
+      images,
+      sidebarWidth,
+      thumbnailSize,
+      sortOrder,
+      usageFilter,
+      tagFilter,
+      currentPage,
+      hasMore,
+      isLoading,
+      scrollPosition,
+      selectedImageForModal,
+      setDirectory,
+      setImages,
+      addImages,
+      setSidebarWidth,
+      setThumbnailSize,
+      setSortOrder,
+      setUsageFilter,
+      setTagFilter,
+      clearDirectory,
+      setCurrentPage,
+      setHasMore,
+      setIsLoading,
+      setScrollPosition,
+      openImageModal,
+      closeImageModal,
+    }),
+    [
+      directoryPath,
+      images,
+      sidebarWidth,
+      thumbnailSize,
+      sortOrder,
+      usageFilter,
+      tagFilter,
+      currentPage,
+      hasMore,
+      isLoading,
+      scrollPosition,
+      selectedImageForModal,
+      setDirectory,
+      setImages,
+      addImages,
+      setSidebarWidth,
+      setThumbnailSize,
+      setSortOrder,
+      setUsageFilter,
+      setTagFilter,
+      clearDirectory,
+      setCurrentPage,
+      setHasMore,
+      setIsLoading,
+      setScrollPosition,
+      openImageModal,
+      closeImageModal,
+    ]
+  );
 
   return (
     <SidebarContext.Provider value={value}>{children}</SidebarContext.Provider>

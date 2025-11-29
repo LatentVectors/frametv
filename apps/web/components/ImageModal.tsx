@@ -41,20 +41,20 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
   const ZOOM_STEP = 0.3;
 
   // Find current image index
-  const currentIndex = images.findIndex((img) => img.path === image.path);
+  const currentIndex = images.findIndex((img) => img.id === image.id);
   const hasPrevious = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < images.length - 1;
 
   useEffect(() => {
     // Build the URL for the full-resolution image
-    const url = `/api/gallery/image?path=${encodeURIComponent(image.path)}`;
+    const url = `/api/gallery/image?path=${encodeURIComponent(image.filepath)}`;
     setImageUrl(url);
     setIsLoading(true);
     setImageError(false);
     // Reset zoom and position when image changes
     setScale(1);
     setPosition({ x: 0, y: 0 });
-  }, [image.path]);
+  }, [image.id, image.filepath]);
 
   const navigateToPrevious = useCallback(() => {
     if (hasPrevious) {

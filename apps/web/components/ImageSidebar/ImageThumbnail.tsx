@@ -11,7 +11,6 @@ import { Tag } from "@/types";
 interface ImageThumbnailProps {
   image: ImageData;
   size: number;
-  sourceImageId?: number; // Database ID for the source image
 }
 
 const TAG_COLORS = [
@@ -22,11 +21,11 @@ const TAG_COLORS = [
  * ImageThumbnail Component
  * Displays a draggable thumbnail for an image in a square container
  * Shows placeholder icon if thumbnail fails to load
- * Shows visual indicator if image is used in a saved composition
+ * Shows visual indicator if image is used in a saved composition (usage_count > 0)
  * Shows tag icon on hover for managing tags
  * Preserves aspect ratio using object-contain
  */
-export function ImageThumbnail({ image, size, sourceImageId }: ImageThumbnailProps) {
+export function ImageThumbnail({ image, size }: ImageThumbnailProps) {
   const { openImageModal } = useSidebar();
   const [imageError, setImageError] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -37,6 +36,9 @@ export function ImageThumbnail({ image, size, sourceImageId }: ImageThumbnailPro
   const [tagInputValue, setTagInputValue] = useState("");
   const [tagSuggestions, setTagSuggestions] = useState<Tag[]>([]);
   const [addingTag, setAddingTag] = useState(false);
+
+  const sourceImageId = image.id;
+  const thumbnailUrl = sourceImageId ? sourceImagesApi.getThumbnailUrl(sourceImageId) : "";
 
   // Load tags when popover opens
   useEffect(() => {
@@ -104,8 +106,8 @@ export function ImageThumbnail({ image, size, sourceImageId }: ImageThumbnailPro
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
     // Set the file path as drag data
-    e.dataTransfer.setData("text/plain", image.path);
-    e.dataTransfer.setData("image/sidebar", image.path); // Custom type to distinguish sidebar drags
+    e.dataTransfer.setData("text/plain", image.filepath);
+    e.dataTransfer.setData("image/sidebar", image.filepath); // Custom type to distinguish sidebar drags
     e.dataTransfer.effectAllowed = "copy";
     setIsDragging(true);
   };
@@ -124,7 +126,7 @@ export function ImageThumbnail({ image, size, sourceImageId }: ImageThumbnailPro
     }
   };
 
-  const isUsed = image.isUsed ?? false;
+  const isUsed = image.usage_count > 0;
 
   return (
     <div
@@ -142,8 +144,8 @@ export function ImageThumbnail({ image, size, sourceImageId }: ImageThumbnailPro
         height: `${size}px`,
       }}
     >
-      {imageError ? (
-        // Show placeholder icon if thumbnail fails to load
+      {imageError || !thumbnailUrl ? (
+        // Show placeholder icon if thumbnail fails to load or URL is missing
         <div
           className="flex items-center justify-center bg-muted w-full h-full"
         >
@@ -152,7 +154,7 @@ export function ImageThumbnail({ image, size, sourceImageId }: ImageThumbnailPro
       ) : (
         <div className="w-full h-full flex items-center justify-center">
           <img
-            src={image.thumbnailDataUrl}
+            src={thumbnailUrl}
             alt={image.filename}
             className="max-w-full max-h-full object-contain rounded-md"
             onError={handleImageError}
@@ -164,7 +166,7 @@ export function ImageThumbnail({ image, size, sourceImageId }: ImageThumbnailPro
 
       {/* Used indicator badge - top left with green checkmark */}
       {isUsed && (
-        <div className="absolute top-1 left-1 bg-green-500 text-white rounded-full p-0.5">
+        <div className="absolute top-1 left-1 bg-green-500 text-white rounded-full p-0.5 z-10">
           <CheckCircle2 className="h-3 w-3" />
         </div>
       )}

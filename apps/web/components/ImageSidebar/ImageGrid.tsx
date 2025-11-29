@@ -4,6 +4,7 @@ import React, { useCallback, useRef, useEffect } from "react";
 import { useSidebar, ImageData } from "@/contexts/SidebarContext";
 import { ImageThumbnail } from "./ImageThumbnail";
 import { Loader2 } from "lucide-react";
+import { sourceImagesApi } from "@/lib/api/database";
 
 interface ImageGridProps {
   containerWidth: number;
@@ -24,6 +25,8 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
     scrollPosition,
     thumbnailSize,
     sortOrder,
+    usageFilter,
+    tagFilter,
     setCurrentPage,
     addImages,
     setHasMore,
@@ -47,7 +50,7 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
   const columnsCount = Math.max(1, Math.floor((availableWidth + gridGap) / (thumbnailSize + gridGap)));
 
   /**
-   * Load next page of images from backend API
+   * Load next page of images from database API
    */
   const loadMoreImages = useCallback(async () => {
     if (!directoryPath || loadingRef.current || !hasMore) {
@@ -58,29 +61,23 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/albums/browse", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          albumName: directoryPath, // directoryPath now contains album name
-          page: currentPage + 1,
-          limit: 100, // Load 100 images per page
-          sortOrder,
-        }),
+      const usedFilter = usageFilter === "all" ? undefined : usageFilter === "used";
+      const tagsFilter = tagFilter.length > 0 ? tagFilter.join(",") : undefined;
+      
+      const result = await sourceImagesApi.list({
+        album: directoryPath,
+        page: currentPage + 1,
+        limit: 100,
+        sortOrder,
+        sortBy: "date_taken",
+        used: usedFilter,
+        tags: tagsFilter,
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to load more images");
-      }
-
-      const data = await response.json();
-
-      if (data.success && data.images && data.images.length > 0) {
-        addImages(data.images);
-        setCurrentPage(data.page);
-        setHasMore(data.hasMore);
+      if (result.items.length > 0) {
+        addImages(result.items);
+        setCurrentPage(result.page);
+        setHasMore(result.page < result.pages);
       } else {
         setHasMore(false);
       }
@@ -96,6 +93,8 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
     hasMore,
     currentPage,
     sortOrder,
+    usageFilter,
+    tagFilter,
     addImages,
     setCurrentPage,
     setHasMore,
@@ -178,10 +177,9 @@ export function ImageGrid({ containerWidth }: ImageGridProps) {
         >
           {images.map((image) => (
             <ImageThumbnail 
-              key={image.path} 
+              key={image.id} 
               image={image} 
               size={thumbnailSize} 
-              sourceImageId={image.sourceImageId}
             />
           ))}
         </div>

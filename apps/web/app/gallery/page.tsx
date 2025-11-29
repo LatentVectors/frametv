@@ -8,6 +8,7 @@ import { Navigation } from "@/components/Navigation";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { SyncModal } from "@/components/SyncModal";
 import { TagFilter } from "@/components/TagInput";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { syncApi, tvContentApi, galleryImagesApi, tagsApi } from "@/lib/api";
 import { Tag } from "@/types";
 
@@ -288,7 +289,7 @@ export default function GalleryPage() {
     }
   };
 
-  const handleSync = async (mode: "add" | "reset") => {
+  const handleSync = useCallback(async (mode: "add" | "reset") => {
     if (selectedImages.size === 0) {
       return;
     }
@@ -351,10 +352,7 @@ export default function GalleryPage() {
     } finally {
       setSyncing(false);
     }
-  };
-
-  // Use selectedImages.size directly for accurate count
-  const selectedCount = selectedImages.size;
+  }, [selectedImages, tvMappings, toast]);
 
   // Calculate sync preview counts for modal
   const selectedGalleryIds = Array.from(selectedImages);
@@ -419,7 +417,7 @@ export default function GalleryPage() {
           Filters
           {activeFilterCount > 0 && !filterPanelExpanded && (
             <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary-foreground text-primary rounded-full">
-              {activeFilterCount}
+              {activeFilterCount} {activeFilterCount === 1 ? "filter" : "filters"} active
             </span>
           )}
           {filterPanelExpanded ? (
@@ -446,16 +444,16 @@ export default function GalleryPage() {
             </>
           )}
         </Button>
-        {selectedCount > 0 && (
+        {selectedImages.size > 0 && (
           <>
             <span className="text-sm text-muted-foreground">
-              {selectedCount} {selectedCount === 1 ? "image" : "images"}{" "}
+              {selectedImages.size} {selectedImages.size === 1 ? "image" : "images"}{" "}
               selected
             </span>
             <Button
               variant="default"
               onClick={() => setSyncModalOpen(true)}
-              disabled={syncing || selectedCount === 0}
+              disabled={syncing || selectedImages.size === 0}
             >
               {syncing ? (
                 <>
@@ -463,8 +461,8 @@ export default function GalleryPage() {
                   Syncing...
                 </>
               ) : (
-                `Sync ${selectedCount} ${
-                  selectedCount === 1 ? "Image" : "Images"
+                `Sync ${selectedImages.size} ${
+                  selectedImages.size === 1 ? "Image" : "Images"
                 }`
               )}
             </Button>
@@ -520,24 +518,15 @@ export default function GalleryPage() {
           {/* Sort Order */}
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-muted-foreground">Sort:</span>
-            <div className="flex items-center gap-1">
-              <Button
-                variant={sortOrder === "newest" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setSortOrder("newest")}
-                className="h-8"
-              >
-                Newest First
-              </Button>
-              <Button
-                variant={sortOrder === "oldest" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setSortOrder("oldest")}
-                className="h-8"
-              >
-                Oldest First
-              </Button>
-            </div>
+            <Select value={sortOrder} onValueChange={(value: SortOrderType) => setSortOrder(value)}>
+              <SelectTrigger className="w-[140px] h-8 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="newest">Newest First</SelectItem>
+                <SelectItem value="oldest">Oldest First</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Clear all filters */}
@@ -563,7 +552,7 @@ export default function GalleryPage() {
         open={syncModalOpen}
         onClose={() => setSyncModalOpen(false)}
         onConfirm={handleSync}
-        selectedCount={selectedCount}
+        selectedCount={selectedImages.size}
         newCount={newCount}
         removeCount={removeCount}
       />

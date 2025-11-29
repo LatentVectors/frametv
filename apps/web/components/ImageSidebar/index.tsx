@@ -13,8 +13,9 @@ import { ImageGrid } from "./ImageGrid";
 import { ImageModal } from "@/components/ImageModal";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { ChevronUp, SlidersHorizontal, ArrowDownWideNarrow, ArrowUpWideNarrow } from "lucide-react";
+import { ChevronUp, SlidersHorizontal, ArrowDownWideNarrow, ArrowUpWideNarrow, RefreshCw } from "lucide-react";
 import { TagFilter } from "@/components/TagInput";
+import { sourceImagesApi } from "@/lib/api/database";
 
 interface ImageSidebarProps {
   width: number;
@@ -100,31 +101,23 @@ function SidebarHeader() {
     if (directoryPath) {
       setIsLoading(true);
       try {
-        const response = await fetch("/api/albums/browse", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            albumName: directoryPath,
-            page: 1,
-            limit: 100,
-            sortOrder: newSortOrder,
-          }),
+        const usedFilter = usageFilter === "all" ? undefined : usageFilter === "used";
+        const tagsFilter = tagFilter.length > 0 ? tagFilter.join(",") : undefined;
+        
+        const result = await sourceImagesApi.list({
+          album: directoryPath,
+          page: 1,
+          limit: 100,
+          sortOrder: newSortOrder,
+          sortBy: "date_taken",
+          used: usedFilter,
+          tags: tagsFilter,
         });
 
-        if (!response.ok) {
-          throw new Error("Failed to reload images");
-        }
-
-        const data = await response.json();
-
-        if (data.success && data.images) {
-          setImages(data.images);
-          setHasMore(data.hasMore);
-          setCurrentPage(data.page);
-          setScrollPosition(0); // Reset scroll to top
-        }
+        setImages(result.items);
+        setHasMore(result.page < result.pages);
+        setCurrentPage(result.page);
+        setScrollPosition(0); // Reset scroll to top
       } catch (error) {
         console.error("Error reloading images with new sort order:", error);
       } finally {
@@ -302,90 +295,109 @@ function SidebarContent({ width }: { width: number }) {
     images,
     isLoading,
     sortOrder,
+    usageFilter,
+    tagFilter,
     setImages,
     setHasMore,
     setCurrentPage,
     setIsLoading,
-    clearDirectory,
+    setScrollPosition,
   } = useSidebar();
   const [hasAttemptedLoad, setHasAttemptedLoad] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Auto-fetch images if we have a restored album but no images
+  // Fetch images from database API when filters change
   useEffect(() => {
+    // Track if this effect instance is still valid
+    let isCancelled = false;
+    
     const fetchAlbumImages = async () => {
-      if (
-        !directoryPath ||
-        hasAttemptedLoad ||
-        isLoading ||
-        images.length > 0
-      ) {
+      if (!directoryPath) {
         return;
       }
 
-      setHasAttemptedLoad(true);
       setIsLoading(true);
+      setLoadError(null);
 
       try {
-        const response = await fetch("/api/albums/browse", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            albumName: directoryPath,
-            page: 1,
-            limit: 100,
-            sortOrder,
-          }),
+        const usedFilter = usageFilter === "all" ? undefined : usageFilter === "used";
+        const tagsFilter = tagFilter.length > 0 ? tagFilter.join(",") : undefined;
+        
+        console.log("[ImageSidebar] Fetching images for album:", {
+          album: directoryPath,
+          sortOrder,
+          usageFilter,
+          tagFilter,
+        });
+        
+        const result = await sourceImagesApi.list({
+          album: directoryPath,
+          page: 1,
+          limit: 100,
+          sortOrder,
+          sortBy: "date_taken",
+          used: usedFilter,
+          tags: tagsFilter,
         });
 
-        if (!response.ok) {
-          // If album not found, clear the invalid selection
-          if (response.status === 404) {
-            console.warn(`Saved album '${directoryPath}' no longer exists. Clearing selection.`);
-            clearDirectory();
-            return;
-          }
-          throw new Error("Failed to load album images");
-        }
+        console.log("[ImageSidebar] Fetch successful:", {
+          itemCount: result.items.length,
+          page: result.page,
+          pages: result.pages,
+          total: result.total,
+        });
 
-        const data = await response.json();
-
-        if (data.success && data.images) {
-          setImages(data.images);
-          setHasMore(data.hasMore);
-          setCurrentPage(data.page);
-        } else {
-          // If API returns unsuccessful, clear the directory
-          console.warn(`Failed to load album '${directoryPath}':`, data.error);
-          clearDirectory();
+        // Only update state if this effect instance is still valid
+        if (!isCancelled) {
+          setImages(result.items);
+          setHasMore(result.page < result.pages);
+          setCurrentPage(result.page);
+          setScrollPosition(0); // Reset scroll to top when filters change
         }
       } catch (error) {
-        console.error("Error auto-loading album images:", error);
-        // On any error, clear the invalid directory selection
-        clearDirectory();
+        console.error("[ImageSidebar] Error loading album images:", {
+          album: directoryPath,
+          error: error instanceof Error ? {
+            message: error.message,
+            name: error.name,
+            stack: error.stack,
+          } : error,
+        });
+        // Show error state instead of clearing the directory
+        if (!isCancelled) {
+          setLoadError(error instanceof Error ? error.message : "Failed to load images");
+        }
       } finally {
-        setIsLoading(false);
+        if (!isCancelled) {
+          setIsLoading(false);
+          setHasAttemptedLoad(true);
+        }
       }
     };
 
+    // Fetch images when directory or filters change
     fetchAlbumImages();
+    
+    // Cleanup function to prevent state updates after unmount or re-run
+    return () => {
+      isCancelled = true;
+    };
   }, [
     directoryPath,
-    images.length,
-    isLoading,
-    hasAttemptedLoad,
     sortOrder,
+    usageFilter,
+    tagFilter,
     setImages,
     setHasMore,
     setCurrentPage,
     setIsLoading,
-    clearDirectory,
+    setScrollPosition,
   ]);
 
-  // Reset load attempt when directory changes
+  // Reset load attempt and error when directory changes
   useEffect(() => {
     setHasAttemptedLoad(false);
+    setLoadError(null);
   }, [directoryPath]);
 
   // Show album selector if no album is selected
@@ -398,6 +410,35 @@ function SidebarContent({ width }: { width: number }) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-6">
         <p className="text-sm text-muted-foreground text-center">Loading images...</p>
+      </div>
+    );
+  }
+
+  // Show error state if there was an error loading images
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-6 space-y-3">
+        <p className="text-sm text-destructive text-center font-medium">
+          Failed to load images
+        </p>
+        <p className="text-xs text-muted-foreground text-center max-w-[200px]">
+          {loadError}
+        </p>
+        <p className="text-xs text-muted-foreground text-center">
+          Check browser console (F12) for details
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setLoadError(null);
+            setHasAttemptedLoad(false);
+          }}
+          className="mt-2"
+        >
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Retry
+        </Button>
       </div>
     );
   }

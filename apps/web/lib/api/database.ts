@@ -16,25 +16,53 @@ async function apiFetch<T>(
   options?: RequestInit
 ): Promise<T> {
   const url = `${DATABASE_SERVICE_URL}${endpoint}`;
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
+  
+  console.log("[Database API] Request:", {
+    url,
+    method: options?.method || "GET",
   });
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: "Unknown error" }));
-    throw new Error(error.detail || `API error: ${response.statusText}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: "Unknown error" }));
+      console.error("[Database API] Error response:", {
+        url,
+        status: response.status,
+        statusText: response.statusText,
+        error,
+      });
+      throw new Error(error.detail || `API error: ${response.statusText}`);
+    }
+
+    // Handle 204 No Content responses
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    const data = await response.json();
+    console.log("[Database API] Success:", {
+      url,
+      status: response.status,
+    });
+    return data;
+  } catch (error) {
+    // Log network errors (fetch failures)
+    if (error instanceof TypeError) {
+      console.error("[Database API] Network error:", {
+        url,
+        error: error.message,
+      });
+    }
+    throw error;
   }
-
-  // Handle 204 No Content responses
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  return response.json();
 }
 
 /**

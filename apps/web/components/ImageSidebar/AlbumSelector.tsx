@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { RefreshCw, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,21 +27,27 @@ export function AlbumSelector() {
   const {
     directoryPath,
     setDirectory,
-    setImages,
-    setHasMore,
-    setCurrentPage,
-    setIsLoading,
     setScrollPosition,
-    sortOrder,
   } = useSidebar();
   const [albums, setAlbums] = useState<Album[]>([]);
-  const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null);
+  const [selectedAlbum, setSelectedAlbum] = useState<string | null>(directoryPath);
   const [isLoading, setIsLoadingState] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipTimeout, setTooltipTimeout] = useState<NodeJS.Timeout | null>(
     null
   );
+  
+  // Use a ref to track the current directoryPath without causing re-renders
+  const directoryPathRef = useRef(directoryPath);
+  useEffect(() => {
+    directoryPathRef.current = directoryPath;
+  }, [directoryPath]);
+
+  // Sync selectedAlbum with directoryPath from context
+  useEffect(() => {
+    setSelectedAlbum(directoryPath);
+  }, [directoryPath]);
 
   const fetchAlbums = useCallback(async () => {
     try {
@@ -61,14 +67,16 @@ export function AlbumSelector() {
 
       setAlbums(data.albums);
 
-      // If currently selected album no longer exists, clear selection
+      // If currently selected album (from context) no longer exists, clear selection
+      // Use ref to get current value without dependency
+      const currentPath = directoryPathRef.current;
       if (
-        selectedAlbum &&
-        !data.albums.some((album) => album.name === selectedAlbum)
+        currentPath &&
+        !data.albums.some((album) => album.name === currentPath)
       ) {
         setSelectedAlbum(null);
         setError(
-          `Album '${selectedAlbum}' no longer exists. Please select a different album.`
+          `Album '${currentPath}' no longer exists. Please select a different album.`
         );
       }
     } catch (error) {
@@ -81,67 +89,24 @@ export function AlbumSelector() {
     } finally {
       setIsLoadingState(false);
     }
-  }, [selectedAlbum]);
+  }, []); // No dependencies - fetch only when explicitly called
 
-  // Fetch albums on mount
+  // Fetch albums on mount only
   useEffect(() => {
     fetchAlbums();
-  }, [fetchAlbums]);
+  }, []); // Empty dependency array - only on mount
 
-  const handleAlbumSelect = async (albumName: string) => {
-    try {
-      setError(null);
-
-      // If selecting a different album, reset scroll position
-      if (albumName !== directoryPath) {
-        setSelectedAlbum(albumName);
-        setScrollPosition(0);
-      }
-
-      setIsLoading(true);
-
-      // Set directory in context
-      setDirectory(albumName);
-
-      // Fetch images for the selected album
-      const response = await fetch("/api/albums/browse", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          albumName,
-          page: 1,
-          limit: 100,
-          sortOrder,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to load album images");
-      }
-
-      const data = await response.json();
-
-      if (!data.success) {
-        throw new Error(data.error || "Failed to load album images");
-      }
-
-      // Update context with images
-      setImages(data.images);
-      setHasMore(data.hasMore);
-      setCurrentPage(data.page);
-    } catch (error) {
-      console.error("Error loading album images:", error);
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Failed to load album images. Please try again."
-      );
-      setSelectedAlbum(null);
-    } finally {
-      setIsLoading(false);
+  const handleAlbumSelect = (albumName: string) => {
+    setError(null);
+    setSelectedAlbum(albumName);
+    
+    // If selecting a different album, reset scroll position
+    if (albumName !== directoryPath) {
+      setScrollPosition(0);
     }
+
+    // Set directory in context - SidebarContent will handle fetching images
+    setDirectory(albumName);
   };
 
   const handleRefresh = () => {
