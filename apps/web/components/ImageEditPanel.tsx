@@ -3,10 +3,12 @@
 import { useState, useCallback, useMemo } from 'react';
 import { ImageAssignment } from '@/types';
 import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { FlipHorizontal, RotateCcw, Eye, EyeOff, Sun, ChevronDown, ChevronUp, Palette } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { FlipHorizontal, RotateCcw, Eye, EyeOff, Sun, ChevronDown, ChevronUp, Palette, Contrast } from 'lucide-react';
+import { AdjustmentSlider } from '@/components/AdjustmentSlider';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 // Custom adjustment icons matching Photoshop's design
 const ContrastIcon = () => (
@@ -58,6 +60,14 @@ const TintIcon = () => (
     {/* Green on left (negative), Magenta on right (positive) - matches Photoshop convention */}
     <circle cx="8" cy="8" r="6" fill="#10b981" />
     <path d="M8 2 A 6 6 0 0 1 8 14 Z" fill="#ec4899" />
+  </svg>
+);
+
+// Sepia icon - warm brown tone
+const SepiaIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="2" y="2" width="12" height="12" rx="2" fill="#8B4513" opacity="0.8" />
+    <rect x="4" y="4" width="8" height="8" rx="1" fill="#D2691E" />
   </svg>
 );
 
@@ -175,6 +185,37 @@ export function ImageEditPanel({ assignment, onUpdate, disabled = false }: Image
     onUpdate({ monochromeColor: undefined });
   }, [onUpdate]);
 
+  const handlePresetChange = useCallback((value: string) => {
+    if (value === 'none') {
+      // Clear all presets
+      onUpdate({
+        saturation: 0,
+        temperature: 0,
+        brightness: 0,
+        monochromeColor: undefined,
+      });
+    } else if (value === 'blackWhite') {
+      // Activate Black & White: sets saturation to -100, clears other preset values
+      onUpdate({
+        saturation: -100,
+        temperature: 0,
+        brightness: 0,
+        monochromeColor: undefined,
+      });
+    } else if (value === 'sepia') {
+      // Activate Sepia: sets temperature, saturation, brightness
+      onUpdate({
+        temperature: 30,
+        saturation: -50,
+        brightness: 10,
+        monochromeColor: undefined,
+      });
+    } else if (value === 'monochrome') {
+      // Activate Monochrome with the current color or default
+      handleMonochromePreset(monochromeColor || '#3b82f6');
+    }
+  }, [onUpdate, monochromeColor, handleMonochromePreset]);
+
   const handleGlobalToggle = () => {
     onUpdate({ filtersEnabled: !filtersEnabled });
   };
@@ -257,119 +298,102 @@ export function ImageEditPanel({ assignment, onUpdate, disabled = false }: Image
           }`}
         >
           <div className="px-6 pb-6">
-            {/* Filter Presets - Mutually Exclusive */}
-            <div className="mb-4 pb-4 border-b border-border">
-              <label className="text-sm font-medium mb-2 block">Filter Presets</label>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant={activePreset === 'blackWhite' ? "default" : "outline"}
-                  size="sm"
-                  onClick={handleBlackWhitePreset}
-                  disabled={disabled}
-                  className="h-7 text-xs"
-                >
-                  Black & White
-                </Button>
-                <Button
-                  variant={activePreset === 'sepia' ? "default" : "outline"}
-                  size="sm"
-                  onClick={handleSepiaPreset}
-                  disabled={disabled}
-                  className="h-7 text-xs"
-                >
-                  Sepia
-                </Button>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant={activePreset === 'monochrome' ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => {
-                      if (activePreset === 'monochrome') {
-                        handleClearMonochrome();
-                      } else {
-                        handleMonochromePreset('#3b82f6');
-                      }
-                    }}
-                    disabled={disabled}
-                    className="h-7 text-xs"
-                  >
-                    Monochrome
-                  </Button>
-                  {/* Always-visible color swatch */}
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <button
-                        className={`w-7 h-7 rounded border-2 flex items-center justify-center transition-opacity ${
-                          activePreset === 'monochrome' 
-                            ? 'border-foreground opacity-100' 
-                            : 'border-muted opacity-50 hover:opacity-75'
-                        }`}
-                        style={{ backgroundColor: monochromeColor || '#3b82f6' }}
-                        disabled={disabled}
-                      >
-                        <Palette className="h-3.5 w-3.5 text-white drop-shadow" />
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-3">
-                      <div className="space-y-2">
-                        <label className="text-xs font-medium">Select Monochrome Color</label>
-                        <div className="grid grid-cols-6 gap-1">
-                          {MONOCHROME_COLORS.map((color) => (
-                            <button
-                              key={color}
-                              className={`w-6 h-6 rounded border-2 ${
-                                monochromeColor === color ? 'border-foreground' : 'border-transparent'
-                              }`}
-                              style={{ backgroundColor: color }}
-                              onClick={() => handleMonochromePreset(color)}
-                            />
-                          ))}
-                        </div>
-                        <Input
-                          type="color"
-                          value={monochromeColor || '#3b82f6'}
-                          onChange={(e) => handleMonochromePreset(e.target.value)}
-                          className="h-8 w-full cursor-pointer"
-                        />
-                        {monochromeColor && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleClearMonochrome}
-                            className="w-full h-7 text-xs"
-                          >
-                            Clear Monochrome
-                          </Button>
-                        )}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-            </div>
-
             {/* Controls Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Column 1: Mirror */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium w-24 flex-shrink-0">Mirror</label>
-                  <Button
-                    variant={mirrorX ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => onUpdate({ mirrorX: !mirrorX })}
-                    disabled={disabled}
-                    className="h-7"
-                  >
-                    <FlipHorizontal className="h-3.5 w-3.5 mr-2" />
-                    Flip Horizontal
-                  </Button>
+              {/* Column 1: Mirror and Filter Presets */}
+              <TooltipProvider>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium w-24 flex-shrink-0">Transform</label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant={mirrorX ? "default" : "outline"}
+                          size="icon"
+                          onClick={() => onUpdate({ mirrorX: !mirrorX })}
+                          disabled={disabled}
+                          className="h-7 w-7"
+                        >
+                          <FlipHorizontal className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Flip Horizontal</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  {/* Filter Presets */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium w-24 flex-shrink-0">Preset</label>
+                    <Select
+                      value={activePreset}
+                      onValueChange={handlePresetChange}
+                      disabled={disabled}
+                    >
+                      <SelectTrigger className="h-7 w-auto min-w-[140px]">
+                        <SelectValue placeholder="Preset" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        <SelectItem value="blackWhite">Black & White</SelectItem>
+                        <SelectItem value="sepia">Sepia</SelectItem>
+                        <SelectItem value="monochrome">Monochrome</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {/* Color swatch only appears when monochrome is selected */}
+                    {activePreset === 'monochrome' && (
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button
+                            className="w-7 h-7 rounded border-2 border-foreground flex items-center justify-center"
+                            style={{ backgroundColor: monochromeColor || '#3b82f6' }}
+                            disabled={disabled}
+                          >
+                            <Palette className="h-3.5 w-3.5 text-white drop-shadow" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-3">
+                          <div className="space-y-2">
+                            <label className="text-xs font-medium">Select Monochrome Color</label>
+                            <div className="grid grid-cols-6 gap-1">
+                              {MONOCHROME_COLORS.map((color) => (
+                                <button
+                                  key={color}
+                                  className={`w-6 h-6 rounded border-2 ${
+                                    monochromeColor === color ? 'border-foreground' : 'border-transparent'
+                                  }`}
+                                  style={{ backgroundColor: color }}
+                                  onClick={() => handleMonochromePreset(color)}
+                                />
+                              ))}
+                            </div>
+                            <Input
+                              type="color"
+                              value={monochromeColor || '#3b82f6'}
+                              onChange={(e) => handleMonochromePreset(e.target.value)}
+                              className="h-8 w-full cursor-pointer"
+                            />
+                            {monochromeColor && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleClearMonochrome}
+                                className="w-full h-7 text-xs"
+                              >
+                                Clear Monochrome
+                              </Button>
+                            )}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    )}
+                  </div>
                 </div>
-              </div>
+              </TooltipProvider>
 
               {/* Column 2: Brightness, Contrast, Saturation */}
               <div className="space-y-3">
-                <SliderControl
+                <AdjustmentSlider
                   label="Brightness"
                   icon={<Sun className="h-4 w-4" />}
                   value={brightness}
@@ -383,7 +407,7 @@ export function ImageEditPanel({ assignment, onUpdate, disabled = false }: Image
                   onReset={() => onUpdate({ brightness: 0 })}
                 />
 
-                <SliderControl
+                <AdjustmentSlider
                   label="Contrast"
                   icon={<ContrastIcon />}
                   value={contrast}
@@ -397,7 +421,7 @@ export function ImageEditPanel({ assignment, onUpdate, disabled = false }: Image
                   onReset={() => onUpdate({ contrast: 0 })}
                 />
 
-                <SliderControl
+                <AdjustmentSlider
                   label="Saturation"
                   icon={<SaturationIcon />}
                   value={saturation}
@@ -414,7 +438,7 @@ export function ImageEditPanel({ assignment, onUpdate, disabled = false }: Image
 
               {/* Column 3: Hue, Temperature, Tint */}
               <div className="space-y-3">
-                <SliderControl
+                <AdjustmentSlider
                   label="Hue"
                   icon={<HueIcon />}
                   value={hue}
@@ -428,7 +452,7 @@ export function ImageEditPanel({ assignment, onUpdate, disabled = false }: Image
                   onReset={() => onUpdate({ hue: 0 })}
                 />
 
-                <SliderControl
+                <AdjustmentSlider
                   label="Temperature"
                   icon={<TemperatureIcon />}
                   value={temperature}
@@ -442,7 +466,7 @@ export function ImageEditPanel({ assignment, onUpdate, disabled = false }: Image
                   onReset={() => onUpdate({ temperature: 0 })}
                 />
 
-                <SliderControl
+                <AdjustmentSlider
                   label="Tint"
                   icon={<TintIcon />}
                   value={tint}
@@ -464,100 +488,3 @@ export function ImageEditPanel({ assignment, onUpdate, disabled = false }: Image
   );
 }
 
-interface SliderControlProps {
-  label: string;
-  icon: React.ReactNode;
-  value: number;
-  enabled: boolean;
-  globalEnabled: boolean;
-  min: number;
-  max: number;
-  disabled?: boolean;
-  onValueChange: (value: number) => void;
-  onToggle: () => void;
-  onReset: () => void;
-}
-
-function SliderControl({
-  label,
-  icon,
-  value,
-  enabled,
-  globalEnabled,
-  min,
-  max,
-  disabled = false,
-  onValueChange,
-  onToggle,
-  onReset,
-}: SliderControlProps) {
-  const isActive = globalEnabled && enabled && !disabled;
-  const hasValue = value !== 0;
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newValue = parseInt(e.target.value, 10);
-    if (!isNaN(newValue) && newValue >= min && newValue <= max) {
-      onValueChange(newValue);
-    }
-  };
-
-  const handleInputBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    const newValue = parseInt(e.target.value, 10);
-    if (isNaN(newValue)) {
-      onValueChange(0);
-    } else {
-      onValueChange(Math.max(min, Math.min(max, newValue)));
-    }
-  };
-
-  return (
-    <div className={`flex items-center gap-1.5 ${!isActive ? 'opacity-50' : ''}`}>
-      <div className="w-6 h-6 flex items-center justify-center flex-shrink-0" title={label}>
-        {icon}
-      </div>
-      <Slider
-        value={[value]}
-        onValueChange={([newValue]) => onValueChange(newValue)}
-        min={min}
-        max={max}
-        step={1}
-        className="flex-1"
-        disabled={!isActive}
-      />
-      <Input
-        type="number"
-        value={value}
-        onChange={handleInputChange}
-        onBlur={handleInputBlur}
-        min={min}
-        max={max}
-        className="w-12 h-6 text-xs text-center px-1"
-        disabled={!isActive}
-      />
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onToggle}
-        disabled={disabled}
-        className="h-6 w-6 p-0 flex-shrink-0"
-        title={enabled ? `Disable ${label}` : `Enable ${label}`}
-      >
-        {enabled ? (
-          <Eye className="h-3 w-3" />
-        ) : (
-          <EyeOff className="h-3 w-3 text-muted-foreground" />
-        )}
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onReset}
-        disabled={disabled || !hasValue}
-        className="h-6 w-6 p-0 flex-shrink-0"
-        title={`Reset ${label}`}
-      >
-        <RotateCcw className="h-3 w-3" />
-      </Button>
-    </div>
-  );
-}

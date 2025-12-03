@@ -189,6 +189,12 @@ export const galleryImagesApi = {
       method: "DELETE",
     });
   },
+  deleteMultiple: async (ids: number[]): Promise<{ deleted: number; failed: number; errors: string[] }> => {
+    return apiFetch(`/gallery-images/delete-multiple`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+  },
   // Tag methods
   getTags: async (id: number): Promise<Tag[]> => {
     return apiFetch(`/gallery-images/${id}/tags`);

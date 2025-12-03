@@ -105,9 +105,13 @@ export function ImageThumbnail({ image, size }: ImageThumbnailProps) {
   };
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
-    // Set the file path as drag data
+    // Set the file path and source image ID as drag data (JSON encoded)
+    const dragData = JSON.stringify({
+      filepath: image.filepath,
+      sourceImageId: image.id,
+    });
     e.dataTransfer.setData("text/plain", image.filepath);
-    e.dataTransfer.setData("image/sidebar", image.filepath); // Custom type to distinguish sidebar drags
+    e.dataTransfer.setData("image/sidebar", dragData); // Custom type to distinguish sidebar drags
     e.dataTransfer.effectAllowed = "copy";
     setIsDragging(true);
   };

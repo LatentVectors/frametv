@@ -2,14 +2,13 @@
 CLI tool for pairing with Samsung Frame TV.
 
 This tool handles the complete pairing workflow:
-1. Loads TV settings from data/tv-settings.json
+1. Loads TV settings from database
 2. Initiates pairing with TV using encrypted authenticator
 3. Prompts user for PIN displayed on TV
 4. Validates PIN and saves token to data/tv_token.txt
 """
 
 import asyncio
-import json
 import logging
 from pathlib import Path
 from typing import Optional
@@ -17,19 +16,13 @@ from typing import Optional
 import aiohttp
 import typer
 from samsungtvws.encrypted.authenticator import SamsungTVEncryptedWSAsyncAuthenticator
+from database_client import DatabaseClient
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = typer.Typer()
-
-
-def get_settings_file_path() -> Path:
-    """Get path to TV settings file (../../data/tv-settings.json)."""
-    script_dir = Path(__file__).parent.absolute()
-    project_root = script_dir.parent.parent.parent
-    return project_root / "data" / "tv-settings.json"
 
 
 def get_token_file_path() -> Path:
@@ -39,29 +32,20 @@ def get_token_file_path() -> Path:
     return project_root / "data" / "tv_token.txt"
 
 
-def load_settings() -> Optional[dict]:
-    """Load TV settings from JSON file."""
-    settings_path = get_settings_file_path()
-    if not settings_path.exists():
-        return None
-
-    try:
-        with open(settings_path, "r") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.warning(f"Failed to load settings file: {e}")
-        return None
-
-
 async def async_main(ip: Optional[str], port: int):
     """Async implementation of pairing workflow."""
-    # Load settings from file
-    settings = load_settings()
-
-    # Determine IP address
+    # Load settings from database
     tv_ip = ip
-    if not tv_ip and settings:
-        tv_ip = settings.get("ipAddress")
+    if not tv_ip:
+        try:
+            db_client = DatabaseClient()
+            try:
+                tv_ip = await db_client.get_setting("tv_ip_address")
+            finally:
+                await db_client.close()
+        except Exception as e:
+            logger.warning(f"Failed to load settings from database: {e}")
+            tv_ip = None
 
     # Prompt for IP if still not available
     if not tv_ip:

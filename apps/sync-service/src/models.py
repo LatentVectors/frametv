@@ -31,3 +31,23 @@ class SyncResponse(BaseModel):
     failed: List[FailedImage]  # Failed images with error messages
     total: int
     successful: int
+
+
+class FailedDelete(BaseModel):
+    """Model for failed delete information."""
+
+    tv_content_id: str
+    error: str
+
+
+class DeleteRequest(BaseModel):
+    """Request model for deleting images from TV."""
+
+    tv_content_ids: List[str]  # TV content IDs to delete
+
+
+class DeleteResponse(BaseModel):
+    """Response model for delete operation."""
+
+    deleted: List[str]  # Successfully deleted TV content IDs
+    failed: List[FailedDelete]  # Failed deletions with error messages

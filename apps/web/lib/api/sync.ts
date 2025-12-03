@@ -35,6 +35,16 @@ export interface RefreshTVStateResponse {
   manual_uploads: number;
 }
 
+export interface FailedDelete {
+  tv_content_id: string;
+  error: string;
+}
+
+export interface DeleteTVContentResponse {
+  deleted: string[];
+  failed: FailedDelete[];
+}
+
 /**
  * Generic API fetch wrapper with error handling.
  */
@@ -69,6 +79,12 @@ export const syncApi = {
   refreshTVState: async (): Promise<RefreshTVStateResponse> => {
     return apiFetch(`/tv-content/refresh`, {
       method: "POST",
+    });
+  },
+  deleteTVContent: async (tvContentIds: string[]): Promise<DeleteTVContentResponse> => {
+    return apiFetch(`/tv-content/delete`, {
+      method: "POST",
+      body: JSON.stringify({ tv_content_ids: tvContentIds }),
     });
   },
 };

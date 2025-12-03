@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readSettings, writeSettings, isConfigured } from "@/lib/settingsUtils";
+import { settingsApi } from "@/lib/api/database";
 import fs from "fs";
 import path from "path";
 import { getDataDirectory } from "@/lib/dataUtils";
@@ -17,14 +17,17 @@ function checkTokenExists(): boolean {
 
 export async function GET() {
   try {
-    const settings = readSettings();
-    const configured = isConfigured();
+    // Get settings from database
+    const dbSettings = await settingsApi.getAll() as { settings?: Record<string, any> };
+    const tvIpAddress = dbSettings.settings?.tv_ip_address;
+    const tvPort = dbSettings.settings?.tv_port;
+    const isConfigured = !!tvIpAddress;
     const isPaired = checkTokenExists();
 
     return NextResponse.json({
-      ipAddress: settings?.ipAddress,
-      port: settings?.port,
-      isConfigured: configured,
+      ipAddress: tvIpAddress,
+      port: tvPort,
+      isConfigured,
       isPaired,
       pairingInstructions:
         "Run 'python src/pair_tv.py' from the sync-service directory",
@@ -67,8 +70,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Write settings
-    writeSettings({ ipAddress, port });
+    // Save settings to database
+    await settingsApi.set("tv_ip_address", ipAddress);
+    await settingsApi.set("tv_port", port);
 
     return NextResponse.json({ success: true });
   } catch (error) {

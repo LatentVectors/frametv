@@ -46,6 +46,14 @@ function HomeContent() {
     onWidthChange: setSidebarWidth,
   });
 
+  const canvasAreaRef = useRef<HTMLDivElement>(null);
+  const [previewSize, setPreviewSize] = useState<{ width: number; height: number }>(
+    () => ({
+      width: CANVAS_WIDTH,
+      height: CANVAS_HEIGHT,
+    })
+  );
+
   const handleTemplateChange = (template: Template) => {
     setSelectedTemplate(template);
     // Clear image assignments when template changes
@@ -100,7 +108,35 @@ function HomeContent() {
       // Get canvas data URL
       const dataUrl = await canvasEditorHandleRef.current.getCanvasDataUrl();
 
-      // Send to save API
+      // Build slots data for database record
+      const slots = selectedTemplate.slots.map((slot, index) => {
+        const assignment = imageAssignments.get(slot.id);
+        return {
+          slot_number: index,
+          source_image_id: assignment?.sourceImageId || null,
+          transform_data: assignment ? {
+            cropX: assignment.cropX,
+            cropY: assignment.cropY,
+            cropWidth: assignment.cropWidth,
+            cropHeight: assignment.cropHeight,
+            rotation: assignment.rotation,
+            mirrorX: assignment.mirrorX,
+            brightness: assignment.brightness,
+            contrast: assignment.contrast,
+            saturation: assignment.saturation,
+            hue: assignment.hue,
+            temperature: assignment.temperature,
+            tint: assignment.tint,
+            filtersEnabled: assignment.filtersEnabled,
+            blackWhiteEnabled: assignment.blackWhiteEnabled,
+            sepiaEnabled: assignment.sepiaEnabled,
+            monochromeEnabled: assignment.monochromeEnabled,
+            monochromeColor: assignment.monochromeColor,
+          } : null,
+        };
+      });
+
+      // Send to save API with template and slot metadata
       const response = await fetch("/api/save", {
         method: "POST",
         headers: {
@@ -108,6 +144,8 @@ function HomeContent() {
         },
         body: JSON.stringify({
           imageData: dataUrl,
+          templateId: selectedTemplate.id,
+          slots,
         }),
       });
 
@@ -142,6 +180,37 @@ function HomeContent() {
     imageAssignments.size === selectedTemplate.slots.length &&
     imageAssignments.size > 0;
 
+  useEffect(() => {
+    const container = canvasAreaRef.current;
+    if (!container) return;
+
+    const aspectRatio = CANVAS_WIDTH / CANVAS_HEIGHT;
+
+    const updatePreviewSize = (width: number, height: number) => {
+      let targetWidth = width;
+      let targetHeight = targetWidth / aspectRatio;
+
+      if (targetHeight > height) {
+        targetHeight = height;
+        targetWidth = targetHeight * aspectRatio;
+      }
+
+      setPreviewSize({ width: targetWidth, height: targetHeight });
+    };
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        updatePreviewSize(width, height);
+      }
+    });
+
+    resizeObserver.observe(container);
+    updatePreviewSize(container.clientWidth, container.clientHeight);
+
+    return () => resizeObserver.disconnect();
+  }, []);
+
   return (
     <main className="flex h-screen flex-col bg-background">
       {/* Top bar - full width */}
@@ -171,17 +240,18 @@ function HomeContent() {
         <div className="flex-1 flex flex-col overflow-hidden bg-background">
           {/* Canvas section */}
           <div className="flex-1 flex items-center justify-center p-6 overflow-hidden min-h-0">
-            <div className="w-full h-full flex items-center justify-center">
+            <div
+              ref={canvasAreaRef}
+              className="w-full h-full flex items-center justify-center min-w-0 min-h-0"
+            >
               {/* Canvas container with 16:9 aspect ratio */}
               <div
                 className="relative bg-card border border-border shadow-sm"
                 style={{
-                  width: "100%",
-                  height: "100%",
+                  width: previewSize.width,
+                  height: previewSize.height,
                   maxWidth: "100%",
                   maxHeight: "100%",
-                  aspectRatio: `${CANVAS_WIDTH} / ${CANVAS_HEIGHT}`,
-                  objectFit: "contain",
                 }}
               >
                 {/* Canvas container div for react-konva Stage */}

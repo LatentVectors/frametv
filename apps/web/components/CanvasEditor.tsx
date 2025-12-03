@@ -18,18 +18,29 @@ import {
   PREVIEW_MIN_HEIGHT,
   CANVAS_BACKGROUND_COLOR,
 } from "@/lib/config";
-import { Template, ImageAssignment } from "@/types";
+import { Template, ImageAssignment, Slot as SlotType } from "@/types";
 import {
   isValidImageFile,
   createImageUrl,
   loadImageFromUrl,
 } from "@/lib/imageUtils";
+import { getSlotAspectRatio } from "@/lib/slotGeometry";
 import { useToast } from "@/hooks/use-toast";
 import Slot from "./Slot";
 import ImageLayer from "./ImageLayer";
 import { SlotEditorModal } from "./SlotEditorModal";
-import { applyTemperatureTintAttributes } from "@/lib/filters/temperatureTint";
-import "@/lib/filters/monochrome"; // Registers the Monochrome filter with Konva
+import { renderImageToSize } from "@/lib/renderImage";
+import { applyFilters } from "@/lib/filters/applyFilters";
+import {
+  getRotatedImagePolygon,
+  getMaxCropAtAspectRatio,
+  cropToPercentage,
+  calculateBoundingBox,
+} from "@/lib/cropGeometry";
+// Import filters to ensure they are registered
+import "@/lib/filters/monochrome";
+import "@/lib/filters/blackWhite";
+import "@/lib/filters/sepia";
 
 interface CanvasEditorProps {
   template: Template;
@@ -154,39 +165,34 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
     }, []);
 
     /**
-     * Calculate initial transform for image to center and fill slot
+     * Calculate initial crop coordinates for image to fill slot at correct aspect ratio
      * @param image - Loaded image element
      * @param slot - Slot to fit image into
-     * @returns Initial transform values (x, y, scaleX, scaleY) relative to slot
+     * @returns Initial crop values (cropX, cropY, cropWidth, cropHeight) as percentages (0-100)
      */
-    const calculateInitialTransform = (
+    const calculateInitialCrop = (
       image: HTMLImageElement,
-      slot: { width: number; height: number }
-    ): { x: number; y: number; scaleX: number; scaleY: number } => {
-      // Convert slot percentage dimensions to canvas pixel dimensions
-      const slotWidth = (slot.width / 100) * CANVAS_WIDTH;
-      const slotHeight = (slot.height / 100) * CANVAS_HEIGHT;
-
-      // Calculate scale to fill slot while maintaining aspect ratio
-      const scaleX = slotWidth / image.width;
-      const scaleY = slotHeight / image.height;
-
-      // Use the larger scale to ensure the image fills the slot (crops excess)
-      const scale = Math.max(scaleX, scaleY);
-
-      // Calculate scaled image dimensions
-      const scaledWidth = image.width * scale;
-      const scaledHeight = image.height * scale;
-
-      // Center the image within the slot
-      const x = (slotWidth - scaledWidth) / 2;
-      const y = (slotHeight - scaledHeight) / 2;
+      slot: SlotType
+    ): { cropX: number; cropY: number; cropWidth: number; cropHeight: number } => {
+      // Calculate slot aspect ratio using true canvas pixels
+      const slotAspectRatio = getSlotAspectRatio(slot);
+      
+      // Default rotation is 0, so bounding box equals image dimensions
+      const rotation = 0;
+      const polygon = getRotatedImagePolygon(image.width, image.height, rotation);
+      const boundingBox = calculateBoundingBox(image.width, image.height, rotation);
+      
+      // Get the maximum crop at the slot's aspect ratio
+      const maxCrop = getMaxCropAtAspectRatio(polygon, slotAspectRatio);
+      
+      // Convert to percentage coordinates
+      const percentageCrop = cropToPercentage(maxCrop, boundingBox);
 
       return {
-        x,
-        y,
-        scaleX: scale,
-        scaleY: scale,
+        cropX: percentageCrop.x,
+        cropY: percentageCrop.y,
+        cropWidth: percentageCrop.width,
+        cropHeight: percentageCrop.height,
       };
     };
 
@@ -197,7 +203,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       async (
         file: File,
         slotId: string,
-        slot: { width: number; height: number }
+        slot: SlotType
       ) => {
         try {
           // Create object URL for the image
@@ -206,19 +212,42 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
           // Load the image from the URL
           const image = await loadImageFromUrl(imageUrl);
 
-          // Calculate initial transform (center and scale to fill)
-          const transform = calculateInitialTransform(image, slot);
+          // Calculate initial crop (maximum crop at slot aspect ratio)
+          const initialCrop = calculateInitialCrop(image, slot);
 
-          // Create image assignment with original dimensions for preview scaling
+          // Create image assignment with crop-based coordinates
           const assignment: ImageAssignment = {
             slotId,
             imageUrl,
-            x: transform.x,
-            y: transform.y,
-            scaleX: transform.scaleX,
-            scaleY: transform.scaleY,
             originalWidth: image.width,
             originalHeight: image.height,
+            // Crop coordinates (percentage 0-100)
+            cropX: initialCrop.cropX,
+            cropY: initialCrop.cropY,
+            cropWidth: initialCrop.cropWidth,
+            cropHeight: initialCrop.cropHeight,
+            // Default transform values
+            rotation: 0,
+            mirrorX: false,
+            // Default filter values
+            filtersEnabled: true,
+            brightness: 0,
+            contrast: 0,
+            saturation: 0,
+            hue: 0,
+            temperature: 0,
+            tint: 0,
+            brightnessEnabled: true,
+            contrastEnabled: true,
+            saturationEnabled: true,
+            hueEnabled: true,
+            temperatureEnabled: true,
+            tintEnabled: true,
+            // Default preset values
+            blackWhiteEnabled: false,
+            sepiaEnabled: false,
+            monochromeEnabled: false,
+            monochromeColor: '#4A90D9',
           };
 
           // Update image assignments
@@ -246,7 +275,8 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       async (
         imagePath: string,
         slotId: string,
-        slot: { width: number; height: number }
+        slot: SlotType,
+        sourceImageId?: number
       ) => {
         try {
           // Fetch the image from the gallery API endpoint
@@ -263,19 +293,43 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
           // Load the image from the URL
           const image = await loadImageFromUrl(imageUrl);
 
-          // Calculate initial transform (center and scale to fill)
-          const transform = calculateInitialTransform(image, slot);
+          // Calculate initial crop (maximum crop at slot aspect ratio)
+          const initialCrop = calculateInitialCrop(image, slot);
 
-          // Create image assignment with original dimensions for preview scaling
+          // Create image assignment with crop-based coordinates
           const assignment: ImageAssignment = {
             slotId,
             imageUrl,
-            x: transform.x,
-            y: transform.y,
-            scaleX: transform.scaleX,
-            scaleY: transform.scaleY,
+            sourceImageId, // Include source image ID for database record creation
             originalWidth: image.width,
             originalHeight: image.height,
+            // Crop coordinates (percentage 0-100)
+            cropX: initialCrop.cropX,
+            cropY: initialCrop.cropY,
+            cropWidth: initialCrop.cropWidth,
+            cropHeight: initialCrop.cropHeight,
+            // Default transform values
+            rotation: 0,
+            mirrorX: false,
+            // Default filter values
+            filtersEnabled: true,
+            brightness: 0,
+            contrast: 0,
+            saturation: 0,
+            hue: 0,
+            temperature: 0,
+            tint: 0,
+            brightnessEnabled: true,
+            contrastEnabled: true,
+            saturationEnabled: true,
+            hueEnabled: true,
+            temperatureEnabled: true,
+            tintEnabled: true,
+            // Default preset values
+            blackWhiteEnabled: false,
+            sepiaEnabled: false,
+            monochromeEnabled: false,
+            monochromeColor: '#4A90D9',
           };
 
           // Update image assignments
@@ -335,11 +389,17 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
         }
 
         // Check if this is a sidebar image drop (custom type set by ImageThumbnail)
-        const sidebarImagePath = e.dataTransfer.getData("image/sidebar");
+        const sidebarImageData = e.dataTransfer.getData("image/sidebar");
 
-        if (sidebarImagePath) {
-          // Handle sidebar image drop
-          await handleSidebarImageDrop(sidebarImagePath, slotId, slot);
+        if (sidebarImageData) {
+          // Handle sidebar image drop - parse JSON data
+          try {
+            const { filepath, sourceImageId } = JSON.parse(sidebarImageData);
+            await handleSidebarImageDrop(filepath, slotId, slot, sourceImageId);
+          } catch {
+            // Fallback for old format (plain filepath string)
+            await handleSidebarImageDrop(sidebarImageData, slotId, slot);
+          }
         } else {
           // Handle filesystem drop
           const files = Array.from(e.dataTransfer.files);
@@ -374,6 +434,7 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
 
     /**
      * Generate canvas as JPEG data URL at full resolution (3840×2160)
+     * Uses the shared renderImage() and applyFilters() utilities for consistency
      */
     const generateCanvasDataUrl = useCallback(async (): Promise<string> => {
       // Create a temporary full-resolution stage
@@ -411,46 +472,20 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
           const slotWidth = (slot.width / 100) * CANVAS_WIDTH;
           const slotHeight = (slot.height / 100) * CANVAS_HEIGHT;
 
-          // Get crop values (stored as percentages 0-100 relative to image)
-          const hasCrop = 
-            assignment.cropX !== undefined && 
-            assignment.cropY !== undefined && 
-            assignment.cropWidth !== undefined && 
-            assignment.cropHeight !== undefined &&
-            (assignment.cropX !== 0 || assignment.cropY !== 0 || 
-             assignment.cropWidth !== 100 || assignment.cropHeight !== 100);
-          
-          const cropX = assignment.cropX ?? 0;
-          const cropY = assignment.cropY ?? 0;
-          const cropWidth = assignment.cropWidth ?? 100;
-          const cropHeight = assignment.cropHeight ?? 100;
-          
-          // Rotation angle in degrees
-          const rotation = assignment.rotation ?? 0;
-          const hasRotation = rotation !== 0;
-          
-          // Calculate crop in image pixels
-          const cropConfig = hasCrop ? {
-            x: (cropX / 100) * image.width,
-            y: (cropY / 100) * image.height,
-            width: (cropWidth / 100) * image.width,
-            height: (cropHeight / 100) * image.height,
-          } : null;
-          
-          // Calculate image dimensions - when cropped, use cropped dimensions
-          let displayWidth: number;
-          let displayHeight: number;
-          
-          if (hasCrop && cropConfig) {
-            displayWidth = cropConfig.width * assignment.scaleX;
-            displayHeight = cropConfig.height * assignment.scaleY;
-          } else {
-            displayWidth = image.width * assignment.scaleX;
-            displayHeight = image.height * assignment.scaleY;
-          }
-          
-          const imageX = slotX + assignment.x;
-          const imageY = slotY + assignment.y;
+          // Use renderImageToSize() to apply geometric transforms (rotate, crop)
+          // and scale to the slot dimensions
+          const { canvas: transformedCanvas } = renderImageToSize(
+            {
+              image,
+              rotation: assignment.rotation ?? 0,
+              cropX: assignment.cropX ?? 0,
+              cropY: assignment.cropY ?? 0,
+              cropWidth: assignment.cropWidth ?? 100,
+              cropHeight: assignment.cropHeight ?? 100,
+            },
+            Math.round(slotWidth),
+            Math.round(slotHeight)
+          );
 
           // Create clipping group for slot
           const clipGroup = new Konva.Group({
@@ -460,132 +495,25 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
             clipHeight: slotHeight,
           });
 
-          // Handle horizontal mirroring
-          const mirrorX = assignment.mirrorX ?? false;
-          const imageScaleX = mirrorX ? -1 : 1;
-          
-          // Calculate center point for rotation
-          const imageCenterX = displayWidth / 2;
-          const imageCenterY = displayHeight / 2;
-          
-          // Calculate offset for rotation
-          let offsetX = 0;
-          let offsetY = 0;
-          
-          if (hasRotation) {
-            offsetX = imageCenterX;
-            offsetY = imageCenterY;
-          }
-          
-          // For mirroring without rotation
-          if (mirrorX && !hasRotation) {
-            offsetX = displayWidth;
-          }
-          
-          // Adjust position when using offset for rotation
-          const adjustedImageX = hasRotation ? imageX + imageCenterX : imageX;
-          const adjustedImageY = hasRotation ? imageY + imageCenterY : imageY;
-
-          // Create image node with crop and rotation
+          // Create image node from the pre-transformed canvas
           const konvaImage = new Konva.Image({
-            image: image,
-            x: adjustedImageX,
-            y: adjustedImageY,
-            width: displayWidth,
-            height: displayHeight,
-            scaleX: imageScaleX,
-            offsetX: offsetX,
-            offsetY: offsetY,
-            rotation: rotation,
-            crop: hasCrop && cropConfig ? cropConfig : undefined,
+            image: transformedCanvas,
+            x: slotX,
+            y: slotY,
+            width: slotWidth,
+            height: slotHeight,
           });
 
-          // Apply filters if any are set (respecting enabled flags)
-          const filters: (typeof Konva.Filters[keyof typeof Konva.Filters])[] = [];
-          
-          // Global master switch
+          // Apply mirror as display transform
+          if (assignment.mirrorX) {
+            konvaImage.scaleX(-1);
+            konvaImage.x(slotX + slotWidth); // Adjust position for flip
+          }
+
+          // Apply filters using the shared utility (respects master toggle and enabled flags)
           const filtersEnabled = assignment.filtersEnabled ?? true;
-          
-          // Individual enabled flags (default to true)
-          const brightnessEnabled = assignment.brightnessEnabled ?? true;
-          const contrastEnabled = assignment.contrastEnabled ?? true;
-          const saturationEnabled = assignment.saturationEnabled ?? true;
-          const hueEnabled = assignment.hueEnabled ?? true;
-          const temperatureEnabled = assignment.temperatureEnabled ?? true;
-          const tintEnabled = assignment.tintEnabled ?? true;
-          
-          // Apply brightness filter (only if globally enabled, individually enabled, and has value)
-          const shouldApplyBrightness = filtersEnabled && brightnessEnabled && 
-            assignment.brightness !== undefined && assignment.brightness !== 0;
-          if (shouldApplyBrightness) {
-            filters.push(Konva.Filters.Brighten);
-          }
-          
-          // Apply contrast filter
-          const shouldApplyContrast = filtersEnabled && contrastEnabled && 
-            assignment.contrast !== undefined && assignment.contrast !== 0;
-          if (shouldApplyContrast) {
-            filters.push(Konva.Filters.Contrast);
-          }
-          
-          // Apply HSL filter (for saturation and hue)
-          const shouldApplySaturation = filtersEnabled && saturationEnabled && 
-            assignment.saturation !== undefined && assignment.saturation !== 0;
-          const shouldApplyHue = filtersEnabled && hueEnabled && 
-            assignment.hue !== undefined && assignment.hue !== 0;
-          if (shouldApplySaturation || shouldApplyHue) {
-            filters.push(Konva.Filters.HSL);
-          }
-          
-          // Apply temperature/tint filter
-          const shouldApplyTemperature = filtersEnabled && temperatureEnabled && 
-            assignment.temperature !== undefined && assignment.temperature !== 0;
-          const shouldApplyTint = filtersEnabled && tintEnabled && 
-            assignment.tint !== undefined && assignment.tint !== 0;
-          const temperatureTintFilter =
-            (Konva.Filters as Record<string, typeof Konva.Filters[keyof typeof Konva.Filters]>).TemperatureTint;
-          if ((shouldApplyTemperature || shouldApplyTint) && temperatureTintFilter) {
-            filters.push(temperatureTintFilter);
-          }
-          
-          // Apply monochrome filter
-          const shouldApplyMonochrome = filtersEnabled && 
-            assignment.monochromeColor !== undefined && assignment.monochromeColor !== '';
-          const monochromeFilter =
-            (Konva.Filters as Record<string, typeof Konva.Filters[keyof typeof Konva.Filters]>).Monochrome;
-          if (shouldApplyMonochrome && monochromeFilter) {
-            filters.push(monochromeFilter);
-          }
-
-          // Apply temperature and tint (only pass values if enabled)
-          const tempValue = shouldApplyTemperature ? (assignment.temperature ?? 0) : 0;
-          const tintValue = shouldApplyTint ? (assignment.tint ?? 0) : 0;
-          applyTemperatureTintAttributes(konvaImage, tempValue, tintValue);
-          
-          // Apply monochrome color if enabled
-          if (shouldApplyMonochrome) {
-            konvaImage.setAttr('_monochromeColor', assignment.monochromeColor);
-          }
-
-          if (filters.length > 0) {
-            konvaImage.filters(filters);
-            
-            if (shouldApplyBrightness) {
-              konvaImage.brightness(assignment.brightness! / 100);
-            }
-            
-            if (shouldApplyContrast) {
-              konvaImage.contrast(assignment.contrast!);
-            }
-            
-            if (shouldApplySaturation) {
-              konvaImage.saturation(assignment.saturation! / 50);
-            }
-            
-            if (shouldApplyHue) {
-              konvaImage.hue(assignment.hue!);
-            }
-            
+          if (filtersEnabled) {
+            applyFilters(konvaImage, assignment);
             konvaImage.cache();
           }
 
@@ -667,59 +595,19 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
       }
     }, [imageAssignments]);
 
-    const handleSlotEditorUpdate = useCallback((slotId: string, updates: Partial<ImageAssignment>) => {
+    /**
+     * Handle save from SlotEditorModal - persists complete ImageAssignment
+     */
+    const handleSlotEditorSave = useCallback((slotId: string, updatedAssignment: ImageAssignment) => {
       setImageAssignments((prev) => {
         const newMap = new Map(prev);
-        const existingAssignment = newMap.get(slotId);
-        if (existingAssignment) {
-          newMap.set(slotId, {
-            ...existingAssignment,
-            ...updates,
-          });
-        }
+        newMap.set(slotId, updatedAssignment);
         return newMap;
       });
+      // Close the modal after saving
+      setSlotEditorModalSlotId(null);
     }, [setImageAssignments]);
 
-    const handleTransformUpdate = useCallback(
-      (slotId: string) => {
-        return (x: number, y: number) => {
-          setImageAssignments((prev) => {
-            const newMap = new Map(prev);
-            const existingAssignment = newMap.get(slotId);
-            if (existingAssignment) {
-              newMap.set(slotId, {
-                ...existingAssignment,
-                x,
-                y,
-              });
-            }
-            return newMap;
-          });
-        };
-      },
-      [setImageAssignments]
-    );
-
-    const handleScaleUpdate = useCallback(
-      (slotId: string) => {
-        return (scaleX: number, scaleY: number) => {
-          setImageAssignments((prev) => {
-            const newMap = new Map(prev);
-            const existingAssignment = newMap.get(slotId);
-            if (existingAssignment) {
-              newMap.set(slotId, {
-                ...existingAssignment,
-                scaleX,
-                scaleY,
-              });
-            }
-            return newMap;
-          });
-        };
-      },
-      [setImageAssignments]
-    );
 
     // Memoize image assignments array to prevent unnecessary re-renders
     const imageAssignmentsArray = useMemo(
@@ -797,8 +685,6 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
                     isSelected={selectedSlotId === slotId}
                     onSelect={() => handleImageSelect(slotId)}
                     onDoubleClick={() => handleImageDoubleClick(slotId)}
-                    onTransformUpdate={handleTransformUpdate(slotId)}
-                    onScaleUpdate={handleScaleUpdate(slotId)}
                     onMouseEnter={() => handleSlotMouseEnter(slotId)}
                     onMouseLeave={handleSlotMouseLeave}
                   />
@@ -836,8 +722,12 @@ const CanvasEditor = forwardRef<CanvasEditorHandle, CanvasEditorProps>(
           <SlotEditorModal
             assignment={editorModalAssignment}
             slot={editorModalSlot}
-            onUpdate={(updates) => handleSlotEditorUpdate(slotEditorModalSlotId, updates)}
-            onClose={() => setSlotEditorModalSlotId(null)}
+            imageDimensions={{
+              width: editorModalAssignment.originalWidth ?? 0,
+              height: editorModalAssignment.originalHeight ?? 0,
+            }}
+            onSave={(updatedAssignment) => handleSlotEditorSave(slotEditorModalSlotId, updatedAssignment)}
+            onCancel={() => setSlotEditorModalSlotId(null)}
           />
         )}
       </>

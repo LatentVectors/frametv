@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": ".venv/bin/python src/main.py",
+    "dev": ".venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload --app-dir src",
     "start": ".venv/bin/python src/main.py"
   }
 }

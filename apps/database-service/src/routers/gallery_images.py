@@ -2,7 +2,10 @@
 API router for GalleryImage endpoints.
 """
 
+import logging
+import os
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Any, Dict
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
@@ -16,6 +19,34 @@ from repositories import (
     TagRepository,
     GalleryImageTagRepository,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _get_data_path() -> Path:
+    """Get the absolute data directory path."""
+    data_path = Path(os.getenv("DATA_PATH", "../../data")).resolve()
+    script_dir = Path(__file__).parent.parent.parent.parent.absolute()
+    if not data_path.is_absolute():
+        data_path = script_dir.parent.parent / data_path
+    return data_path
+
+
+def _delete_file_from_disk(filepath: str) -> bool:
+    """Delete a file from disk. Returns True if file was deleted or didn't exist."""
+    try:
+        data_path = _get_data_path()
+        full_path = data_path / filepath
+        if full_path.exists():
+            full_path.unlink()
+            logger.info(f"Deleted file from disk: {full_path}")
+            return True
+        else:
+            logger.warning(f"File not found on disk: {full_path}")
+            return True  # File doesn't exist, consider it "deleted"
+    except Exception as e:
+        logger.error(f"Failed to delete file {filepath}: {e}")
+        return False
 
 router = APIRouter(prefix="/gallery-images", tags=["gallery-images"])
 
@@ -167,61 +198,71 @@ async def create_gallery_image(
     session: Session = Depends(get_session),
 ):
     """Create a new gallery image with slots."""
-    repo = GalleryImageRepository(session)
-    source_repo = SourceImageRepository(session)
     
-    # Create the gallery image
-    gallery_image = GalleryImage(
-        filename=request.filename,
-        filepath=request.filepath,
-        template_id=request.template_id,
-        notes=request.notes,
-    )
-    created_image = repo.create(gallery_image)
-    
-    # Track source image IDs for usage count updates
-    source_image_ids_to_increment = []
-    
-    # Create slots
-    created_slots = []
-    for slot_data in request.slots:
-        slot = ImageSlot(
-            gallery_image_id=created_image.id,
-            slot_number=slot_data.slot_number,
-            source_image_id=slot_data.source_image_id,
-            transform_data=slot_data.transform_data,
+    try:
+        logger.info(f"Creating gallery image: filename={request.filename}, template_id={request.template_id}, slots={len(request.slots)}")
+        
+        repo = GalleryImageRepository(session)
+        source_repo = SourceImageRepository(session)
+        
+        # Create the gallery image
+        gallery_image = GalleryImage(
+            filename=request.filename,
+            filepath=request.filepath,
+            template_id=request.template_id,
+            notes=request.notes,
         )
+        created_image = repo.create(gallery_image)
+        logger.info(f"Created gallery image with id={created_image.id}")
         
-        # Populate metadata snapshot if source_image_id is set
-        if slot_data.source_image_id:
-            source_image = source_repo.get(slot_data.source_image_id)
-            if source_image:
-                snapshot = _create_metadata_snapshot(source_image)
-                slot.set_metadata_snapshot(snapshot)
-                source_image_ids_to_increment.append(slot_data.source_image_id)
+        # Track source image IDs for usage count updates
+        source_image_ids_to_increment = []
         
-        session.add(slot)
-        created_slots.append(slot)
-    
-    session.commit()
-    
-    # Refresh slots to get IDs
-    for slot in created_slots:
-        session.refresh(slot)
-    
-    # Increment usage counts
-    source_repo.batch_increment_usage(source_image_ids_to_increment)
-    
-    return GalleryImageWithSlots(
-        id=created_image.id,
-        filename=created_image.filename,
-        filepath=created_image.filepath,
-        template_id=created_image.template_id,
-        notes=created_image.notes,
-        created_at=created_image.created_at,
-        updated_at=created_image.updated_at,
-        slots=created_slots,
-    )
+        # Create slots
+        created_slots = []
+        for slot_data in request.slots:
+            logger.info(f"Creating slot: slot_number={slot_data.slot_number}, source_image_id={slot_data.source_image_id}")
+            slot = ImageSlot(
+                gallery_image_id=created_image.id,
+                slot_number=slot_data.slot_number,
+                source_image_id=slot_data.source_image_id,
+                transform_data=slot_data.transform_data,
+            )
+            
+            # Populate metadata snapshot if source_image_id is set
+            if slot_data.source_image_id:
+                source_image = source_repo.get(slot_data.source_image_id)
+                if source_image:
+                    snapshot = _create_metadata_snapshot(source_image)
+                    slot.set_metadata_snapshot(snapshot)
+                    source_image_ids_to_increment.append(slot_data.source_image_id)
+            
+            session.add(slot)
+            created_slots.append(slot)
+        
+        session.commit()
+        logger.info("Committed gallery image and slots to database")
+        
+        # Refresh slots to get IDs
+        for slot in created_slots:
+            session.refresh(slot)
+        
+        # Increment usage counts
+        source_repo.batch_increment_usage(source_image_ids_to_increment)
+        
+        return GalleryImageWithSlots(
+            id=created_image.id,
+            filename=created_image.filename,
+            filepath=created_image.filepath,
+            template_id=created_image.template_id,
+            notes=created_image.notes,
+            created_at=created_image.created_at,
+            updated_at=created_image.updated_at,
+            slots=created_slots,
+        )
+    except Exception as e:
+        logger.exception(f"Error creating gallery image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/{id}", response_model=GalleryImageWithSlots)
@@ -311,13 +352,16 @@ async def delete_gallery_image(
     id: int,
     session: Session = Depends(get_session),
 ):
-    """Delete a gallery image and decrement usage counts."""
+    """Delete a gallery image, its file from disk, and decrement usage counts."""
     repo = GalleryImageRepository(session)
     source_repo = SourceImageRepository(session)
     
     existing = repo.get(id)
     if not existing:
         raise HTTPException(status_code=404, detail="Gallery image not found")
+    
+    # Delete the file from disk first
+    _delete_file_from_disk(existing.filepath)
     
     # Get slots to track source image IDs
     slots = repo.get_slots(id)
@@ -331,6 +375,68 @@ async def delete_gallery_image(
     
     # Decrement usage counts
     source_repo.batch_decrement_usage(source_image_ids)
+
+
+class DeleteMultipleRequest(BaseModel):
+    """Request model for deleting multiple gallery images."""
+    ids: List[int]
+
+
+class DeleteMultipleResponse(BaseModel):
+    """Response model for batch delete operation."""
+    deleted: int
+    failed: int
+    errors: List[str] = []
+
+
+@router.post("/delete-multiple", response_model=DeleteMultipleResponse)
+async def delete_multiple_gallery_images(
+    request: DeleteMultipleRequest,
+    session: Session = Depends(get_session),
+):
+    """Delete multiple gallery images, their files from disk, and decrement usage counts."""
+    repo = GalleryImageRepository(session)
+    source_repo = SourceImageRepository(session)
+    
+    deleted = 0
+    failed = 0
+    errors: List[str] = []
+    all_source_image_ids: List[int] = []
+    
+    for image_id in request.ids:
+        try:
+            existing = repo.get(image_id)
+            if not existing:
+                failed += 1
+                errors.append(f"Image {image_id} not found")
+                continue
+            
+            # Delete the file from disk
+            _delete_file_from_disk(existing.filepath)
+            
+            # Get slots to track source image IDs
+            slots = repo.get_slots(image_id)
+            source_image_ids = [slot.source_image_id for slot in slots if slot.source_image_id]
+            all_source_image_ids.extend(source_image_ids)
+            
+            # Delete slots and gallery image
+            for slot in slots:
+                session.delete(slot)
+            session.delete(existing)
+            deleted += 1
+            
+        except Exception as e:
+            failed += 1
+            errors.append(f"Failed to delete image {image_id}: {str(e)}")
+            logger.exception(f"Error deleting gallery image {image_id}")
+    
+    # Commit all deletions
+    session.commit()
+    
+    # Decrement usage counts for all affected source images
+    source_repo.batch_decrement_usage(all_source_image_ids)
+    
+    return DeleteMultipleResponse(deleted=deleted, failed=failed, errors=errors)
 
 
 # Tag endpoints for gallery images

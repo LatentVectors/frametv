@@ -1,17 +1,35 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Stage, Layer, Rect, Image as KonvaImage, Shape, Group } from 'react-konva';
+import Konva from 'konva';
 import { ImageAssignment, Slot } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { AdjustmentSlider } from '@/components/AdjustmentSlider';
+import { useAdjustmentState, PresetType, FilterEnabledField } from '@/hooks/useAdjustmentState';
 import { 
   FlipHorizontal, 
   RotateCcw, 
   Sun, 
   Palette,
 } from 'lucide-react';
+import { 
+  calculateBoundingBox, 
+  getRotatedImagePolygon,
+  isValidCropPosition,
+  constrainCropToValidArea,
+  cropToPercentage,
+  percentageToCrop,
+  scaleCropFromCenter,
+  fitCropToAspectRatio,
+  CropRect,
+  Polygon,
+} from '@/lib/cropGeometry';
+import { applyFilters } from '@/lib/filters/applyFilters';
+import { getSlotAspectRatio } from '@/lib/slotGeometry';
 
 // Custom adjustment icons
 const ContrastIcon = () => (
@@ -73,21 +91,16 @@ const RotationIcon = () => (
   </svg>
 );
 
+/**
+ * Updated props interface per spec section 13
+ */
 interface SlotEditorModalProps {
   assignment: ImageAssignment;
   slot: Slot;
-  onUpdate: (updates: Partial<ImageAssignment>) => void;
-  onClose: () => void;
+  imageDimensions: { width: number; height: number };
+  onSave: (updatedAssignment: ImageAssignment) => void;
+  onCancel: () => void;
 }
-
-interface CropState {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-type FilterPreset = 'none' | 'blackWhite' | 'sepia' | 'monochrome';
 
 // MONOCHROME COLORS
 const MONOCHROME_COLORS = [
@@ -95,465 +108,507 @@ const MONOCHROME_COLORS = [
   '#8b5cf6', '#ec4899', '#78716c', '#1f2937', '#f5f5f4', '#6366f1'
 ];
 
-export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEditorModalProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
+/**
+ * Create a checkerboard pattern canvas for the background
+ */
+function createCheckerboardPattern(): HTMLCanvasElement {
+  const patternCanvas = document.createElement('canvas');
+  patternCanvas.width = 20;
+  patternCanvas.height = 20;
+  const ctx = patternCanvas.getContext('2d')!;
   
-  // Local state for all editable values
-  const [localState, setLocalState] = useState({
-    brightness: assignment.brightness ?? 0,
-    contrast: assignment.contrast ?? 0,
-    saturation: assignment.saturation ?? 0,
-    hue: assignment.hue ?? 0,
-    temperature: assignment.temperature ?? 0,
-    tint: assignment.tint ?? 0,
-    mirrorX: assignment.mirrorX ?? false,
-    rotation: assignment.rotation ?? 0,
-    monochromeColor: assignment.monochromeColor,
-    cropX: assignment.cropX ?? 0,
-    cropY: assignment.cropY ?? 0,
-    cropWidth: assignment.cropWidth ?? 100,
-    cropHeight: assignment.cropHeight ?? 100,
-  });
+  // Draw the checkerboard pattern (10x10 per square)
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 20, 20);
+  ctx.fillStyle = '#e0e0e0';
+  ctx.fillRect(0, 0, 10, 10);
+  ctx.fillRect(10, 10, 10, 10);
+  
+  return patternCanvas;
+}
 
-  // Canvas interaction state
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+const STAGE_PADDING = 32;
+const MIN_CROP_PERCENT = 5;
+
+export function SlotEditorModal({ 
+  assignment, 
+  slot, 
+  imageDimensions,
+  onSave, 
+  onCancel 
+}: SlotEditorModalProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const imageNodeRef = useRef<Konva.Image | null>(null);
+  const [image, setImage] = useState<HTMLImageElement | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
+  const [checkerboardPattern, setCheckerboardPattern] = useState<HTMLCanvasElement | null>(null);
+  
+  // Calculate slot aspect ratio using true canvas pixels
+  const slotAspectRatio = useMemo(() => getSlotAspectRatio(slot), [slot]);
+  
+  // Task 11.1: Use the adjustment state hook for local state management
+  const {
+    state: localState,
+    updateValue,
+    toggleEnabled,
+    togglePreset,
+    toggleMirror,
+    resetAll: hookResetAll,
+    getAssignment,
+  } = useAdjustmentState(assignment, imageDimensions, slotAspectRatio);
+
+  // Crop drag state
   const [cropDragType, setCropDragType] = useState<'move' | 'nw' | 'ne' | 'sw' | 'se' | null>(null);
-  const [cropDragStart, setCropDragStart] = useState({ x: 0, y: 0 });
-  const [cropStartState, setCropStartState] = useState<CropState | null>(null);
-  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 450 });
+  const [cropDragStart, setCropDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [cropStartPixels, setCropStartPixels] = useState<CropRect | null>(null);
+  
+  // Task 11.8: Debounce refs for filter updates (16ms with requestAnimationFrame)
+  const filterDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rafIdRef = useRef<number | null>(null);
 
-  // Calculate slot aspect ratio
-  const slotAspectRatio = slot.width / slot.height;
-
-  // Determine active preset based on current values
-  // Presets are exclusive and only active if values match exactly
-  const getActivePreset = useCallback((): FilterPreset => {
-    // Check for Monochrome preset (has monochromeColor and saturation is 0)
-    if (localState.monochromeColor && localState.saturation === 0 && 
-        localState.temperature === 0 && localState.brightness === 0) {
-      return 'monochrome';
-    }
-    // Check for Black & White preset (exact values: saturation -100, no monochromeColor, other values reset)
-    if (localState.saturation === -100 && !localState.monochromeColor && 
-        localState.temperature === 0 && localState.brightness === 0) {
-      return 'blackWhite';
-    }
-    // Check for Sepia preset (exact values: temperature 30, saturation -50, brightness 10, no monochromeColor)
-    if (localState.temperature === 30 && localState.saturation === -50 && 
-        localState.brightness === 10 && !localState.monochromeColor) {
-      return 'sepia';
-    }
-    return 'none';
-  }, [localState.monochromeColor, localState.saturation, localState.temperature, localState.brightness]);
-
-  const [activePreset, setActivePreset] = useState<FilterPreset>(getActivePreset());
-
-  // Update active preset when local state changes
+  // Create checkerboard pattern on mount
   useEffect(() => {
-    setActivePreset(getActivePreset());
-  }, [getActivePreset]);
+    setCheckerboardPattern(createCheckerboardPattern());
+  }, []);
 
   // Load image
   useEffect(() => {
-    const img = new Image();
+    const img = new window.Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       setImage(img);
-      // Initialize crop to fill slot if not set
-      if (assignment.cropWidth === undefined) {
-        const imgAspect = img.width / img.height;
-        let cropW, cropH;
-        
-        if (imgAspect > slotAspectRatio) {
-          cropH = 100;
-          cropW = (slotAspectRatio / imgAspect) * 100;
-        } else {
-          cropW = 100;
-          cropH = (imgAspect / slotAspectRatio) * 100;
-        }
-        
-        setLocalState(prev => ({
-          ...prev,
-          cropX: (100 - cropW) / 2,
-          cropY: (100 - cropH) / 2,
-          cropWidth: cropW,
-          cropHeight: cropH,
-        }));
-      }
+      setLoadError(null);
+    };
+    img.onerror = () => {
+      setLoadError('Failed to load image');
     };
     img.src = assignment.imageUrl;
-  }, [assignment.imageUrl, assignment.cropWidth, slotAspectRatio]);
+  }, [assignment.imageUrl]);
 
-  // Update canvas size based on container
+  // Update stage size based on container
   useEffect(() => {
     const updateSize = () => {
-      if (!containerRef.current) return;
+      if (!containerRef.current || !image) return;
       const rect = containerRef.current.getBoundingClientRect();
       const maxWidth = rect.width - 40;
       const maxHeight = rect.height - 40;
       
+      // Calculate bounding box for rotated image
+      const bbox = calculateBoundingBox(image.width, image.height, localState.rotation);
+      const bboxAspectRatio = bbox.width / bbox.height;
+      
       let width = maxWidth;
-      let height = width / slotAspectRatio;
+      let height = width / bboxAspectRatio;
       
       if (height > maxHeight) {
         height = maxHeight;
-        width = height * slotAspectRatio;
+        width = height * bboxAspectRatio;
       }
       
-      setCanvasSize({ width, height });
+      setStageSize({ width, height });
     };
     
     updateSize();
     window.addEventListener('resize', updateSize);
     return () => window.removeEventListener('resize', updateSize);
-  }, [slotAspectRatio]);
+  }, [image, localState.rotation]);
 
-  // Draw canvas
+  // Task 5.1: Compute bounding box from loaded image dimensions (not props)
+  // This is the source of truth for all coordinate conversions
+  const boundingBox = useMemo(() => {
+    if (!image) return { width: 1, height: 1 }; // Fallback to avoid division by zero
+    return calculateBoundingBox(image.width, image.height, localState.rotation);
+  }, [image, localState.rotation]);
+
+  // Task 5.2: Derive displayScale from boundingBox
+  const displayScale = useMemo(
+    () =>
+      Math.min(
+        stageSize.width / boundingBox.width,
+        stageSize.height / boundingBox.height
+      ),
+    [stageSize, boundingBox]
+  );
+
+  // Task 5.3: Calculate crop rectangle in display coordinates using correct pipeline:
+  // percentage → bounding box pixels → display coordinates (multiply by displayScale)
+  const displayCrop = useMemo((): CropRect => {
+    // Convert percentage to bounding box pixels first
+    const cropPixels = {
+      x: (localState.cropX / 100) * boundingBox.width,
+      y: (localState.cropY / 100) * boundingBox.height,
+      width: (localState.cropWidth / 100) * boundingBox.width,
+      height: (localState.cropHeight / 100) * boundingBox.height,
+    };
+    // Then scale to display coordinates
+    return {
+      x: cropPixels.x * displayScale,
+      y: cropPixels.y * displayScale,
+      width: cropPixels.width * displayScale,
+      height: cropPixels.height * displayScale,
+    };
+  }, [
+    localState.cropX,
+    localState.cropY,
+    localState.cropWidth,
+    localState.cropHeight,
+    boundingBox,
+    displayScale,
+  ]);
+
+  const stageWidth = stageSize.width + STAGE_PADDING * 2;
+  const stageHeight = stageSize.height + STAGE_PADDING * 2;
+  const stageCursor = cropDragType ? 'grabbing' : 'grab';
+
+  // Get current assignment state for filter application
+  const currentAssignment = useMemo((): ImageAssignment => ({
+    ...assignment,
+    ...localState,
+  }), [assignment, localState]);
+
+  // Task 11.8: Debounced filter application (16ms) with requestAnimationFrame
   useEffect(() => {
-    if (!canvasRef.current || !image) return;
+    if (!imageNodeRef.current) return;
     
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    canvas.width = canvasSize.width;
-    canvas.height = canvasSize.height;
-    
-    ctx.fillStyle = '#1f2937';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    const baseScale = Math.max(canvas.width / image.width, canvas.height / image.height);
-    const scale = baseScale * zoom;
-    const imgWidth = image.width * scale;
-    const imgHeight = image.height * scale;
-    const imgX = (canvas.width - imgWidth) / 2 + pan.x;
-    const imgY = (canvas.height - imgHeight) / 2 + pan.y;
-    
-    ctx.save();
-    
-    // Apply rotation around center
-    if (localState.rotation !== 0) {
-      const centerX = canvas.width / 2;
-      const centerY = canvas.height / 2;
-      ctx.translate(centerX, centerY);
-      ctx.rotate((localState.rotation * Math.PI) / 180);
-      ctx.translate(-centerX, -centerY);
+    // Clear any pending debounce
+    if (filterDebounceRef.current) {
+      clearTimeout(filterDebounceRef.current);
+    }
+    if (rafIdRef.current) {
+      cancelAnimationFrame(rafIdRef.current);
     }
     
-    // Apply mirror
-    if (localState.mirrorX) {
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-    }
+    // Debounce filter updates by 16ms (~60fps)
+    filterDebounceRef.current = setTimeout(() => {
+      // Use requestAnimationFrame for smooth frame timing
+      rafIdRef.current = requestAnimationFrame(() => {
+        const node = imageNodeRef.current;
+        if (!node) return;
+        
+        applyFilters(node, currentAssignment);
+        node.cache();
+        node.getLayer()?.batchDraw();
+      });
+    }, 16);
     
-    ctx.drawImage(image, imgX, imgY, imgWidth, imgHeight);
-    ctx.restore();
-    
-    // Draw crop overlay (always visible)
-    const cropX = (localState.cropX / 100) * imgWidth + imgX;
-    const cropY = (localState.cropY / 100) * imgHeight + imgY;
-    const cropW = (localState.cropWidth / 100) * imgWidth;
-    const cropH = (localState.cropHeight / 100) * imgHeight;
-    
-    // Semi-transparent overlay outside crop
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.fillRect(0, 0, canvas.width, cropY);
-      ctx.fillRect(0, cropY + cropH, canvas.width, canvas.height - (cropY + cropH));
-      ctx.fillRect(0, cropY, cropX, cropH);
-      ctx.fillRect(cropX + cropW, cropY, canvas.width - (cropX + cropW), cropH);
-      
-    // Crop border
-      ctx.strokeStyle = '#3b82f6';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(cropX, cropY, cropW, cropH);
-      
-    // Rule of thirds grid
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.lineWidth = 1;
-    for (let i = 1; i < 3; i++) {
-      ctx.beginPath();
-      ctx.moveTo(cropX + (cropW * i) / 3, cropY);
-      ctx.lineTo(cropX + (cropW * i) / 3, cropY + cropH);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(cropX, cropY + (cropH * i) / 3);
-      ctx.lineTo(cropX + cropW, cropY + (cropH * i) / 3);
-      ctx.stroke();
-    }
-    
-    // Corner handles
-    const handleSize = 12;
-      ctx.fillStyle = '#3b82f6';
-      ctx.fillRect(cropX - handleSize/2, cropY - handleSize/2, handleSize, handleSize);
-      ctx.fillRect(cropX + cropW - handleSize/2, cropY - handleSize/2, handleSize, handleSize);
-      ctx.fillRect(cropX - handleSize/2, cropY + cropH - handleSize/2, handleSize, handleSize);
-      ctx.fillRect(cropX + cropW - handleSize/2, cropY + cropH - handleSize/2, handleSize, handleSize);
-  }, [image, zoom, pan, localState, canvasSize]);
-
-  // Mouse handlers for crop/pan
-  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !image) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-      const baseScale = Math.max(canvas.width / image.width, canvas.height / image.height);
-      const scale = baseScale * zoom;
-      const imgWidth = image.width * scale;
-      const imgHeight = image.height * scale;
-      const imgX = (canvas.width - imgWidth) / 2 + pan.x;
-      const imgY = (canvas.height - imgHeight) / 2 + pan.y;
-      
-    const cropX = (localState.cropX / 100) * imgWidth + imgX;
-    const cropY = (localState.cropY / 100) * imgHeight + imgY;
-    const cropW = (localState.cropWidth / 100) * imgWidth;
-    const cropH = (localState.cropHeight / 100) * imgHeight;
-      
-      const handleSize = 15;
-      
-    // Check corner handles first
-      if (Math.abs(x - cropX) < handleSize && Math.abs(y - cropY) < handleSize) {
-        setCropDragType('nw');
-      } else if (Math.abs(x - (cropX + cropW)) < handleSize && Math.abs(y - cropY) < handleSize) {
-        setCropDragType('ne');
-      } else if (Math.abs(x - cropX) < handleSize && Math.abs(y - (cropY + cropH)) < handleSize) {
-        setCropDragType('sw');
-      } else if (Math.abs(x - (cropX + cropW)) < handleSize && Math.abs(y - (cropY + cropH)) < handleSize) {
-        setCropDragType('se');
-      } else if (x > cropX && x < cropX + cropW && y > cropY && y < cropY + cropH) {
-        setCropDragType('move');
-    } else {
-      // Pan mode
-      setIsDragging(true);
-      setDragStart({ x: x - pan.x, y: y - pan.y });
-      return;
+    // Cleanup on unmount or when dependencies change
+    return () => {
+      if (filterDebounceRef.current) {
+        clearTimeout(filterDebounceRef.current);
       }
-      
-        setCropDragStart({ x, y });
-    setCropStartState({
-      x: localState.cropX,
-      y: localState.cropY,
-      width: localState.cropWidth,
-      height: localState.cropHeight,
-    });
-  }, [image, zoom, pan, localState]);
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+      }
+    };
+  }, [currentAssignment]);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !image) return;
+  /**
+   * Task 5.4: Convert a display coordinate delta to a percentage delta.
+   * Used by all drag handlers to ensure consistent coordinate transformation.
+   */
+
+  // Handle crop drag start
+  const handleCropDragStart = useCallback((type: 'move' | 'nw' | 'ne' | 'sw' | 'se', x: number, y: number) => {
+    setCropDragType(type);
+    setCropDragStart({ x, y });
+    setCropStartPixels(
+      percentageToCrop(
+        {
+          x: localState.cropX,
+          y: localState.cropY,
+          width: localState.cropWidth,
+          height: localState.cropHeight,
+        },
+        boundingBox
+      )
+    );
+  }, [localState.cropX, localState.cropY, localState.cropWidth, localState.cropHeight, boundingBox]);
+
+  // Handle crop drag move
+  const handleCropDragMove = useCallback((stageX: number, stageY: number) => {
+    if (!cropDragType || !cropStartPixels || !image) return;
+
+    const localX = stageX - STAGE_PADDING;
+    const localY = stageY - STAGE_PADDING;
+    const clampedX = Math.min(Math.max(localX, 0), stageSize.width);
+    const clampedY = Math.min(Math.max(localY, 0), stageSize.height);
+
+    const polygon = getRotatedImagePolygon(image.width, image.height, localState.rotation);
+    const pointerBounding = {
+      x: clampedX / displayScale,
+      y: clampedY / displayScale,
+    };
+
+    let nextCrop: CropRect = cropStartPixels;
+
+    if (cropDragType === 'move') {
+      const deltaX = (clampedX - cropDragStart.x) / displayScale;
+      const deltaY = (clampedY - cropDragStart.y) / displayScale;
+
+      nextCrop = {
+        ...cropStartPixels,
+        x: cropStartPixels.x + deltaX,
+        y: cropStartPixels.y + deltaY,
+      };
+
+      nextCrop.x = Math.max(0, Math.min(nextCrop.x, boundingBox.width - nextCrop.width));
+      nextCrop.y = Math.max(0, Math.min(nextCrop.y, boundingBox.height - nextCrop.height));
+
+      if (!isValidCropPosition(nextCrop, polygon)) {
+        nextCrop = constrainCropToValidArea(nextCrop, polygon, slotAspectRatio);
+      }
+    } else {
+      const oppositeCornerMap: Record<'nw' | 'ne' | 'sw' | 'se', 'nw' | 'ne' | 'sw' | 'se'> = {
+        nw: 'se',
+        ne: 'sw',
+        sw: 'ne',
+        se: 'nw',
+      };
+
+      const anchorCorner = oppositeCornerMap[cropDragType];
+      const anchorPoint = (() => {
+        switch (anchorCorner) {
+          case 'nw':
+            return { x: cropStartPixels.x, y: cropStartPixels.y };
+          case 'ne':
+            return { x: cropStartPixels.x + cropStartPixels.width, y: cropStartPixels.y };
+          case 'sw':
+            return { x: cropStartPixels.x, y: cropStartPixels.y + cropStartPixels.height };
+          case 'se':
+          default:
+            return {
+              x: cropStartPixels.x + cropStartPixels.width,
+              y: cropStartPixels.y + cropStartPixels.height,
+            };
+        }
+      })();
+
+      let draft: CropRect = {
+        x: Math.min(pointerBounding.x, anchorPoint.x),
+        y: Math.min(pointerBounding.y, anchorPoint.y),
+        width: Math.abs(anchorPoint.x - pointerBounding.x),
+        height: Math.abs(anchorPoint.y - pointerBounding.y),
+      };
+
+      draft = fitCropToAspectRatio(draft, slotAspectRatio, anchorCorner);
+
+      const minWidthPx = (MIN_CROP_PERCENT / 100) * boundingBox.width;
+      const minHeightPx = minWidthPx / slotAspectRatio;
+      if (draft.width < minWidthPx) {
+        switch (anchorCorner) {
+          case 'nw':
+            draft = { x: anchorPoint.x, y: anchorPoint.y, width: minWidthPx, height: minHeightPx };
+            break;
+          case 'ne':
+            draft = {
+              x: anchorPoint.x - minWidthPx,
+              y: anchorPoint.y,
+              width: minWidthPx,
+              height: minHeightPx,
+            };
+            break;
+          case 'sw':
+            draft = {
+              x: anchorPoint.x,
+              y: anchorPoint.y - minHeightPx,
+              width: minWidthPx,
+              height: minHeightPx,
+            };
+            break;
+          case 'se':
+          default:
+            draft = {
+              x: anchorPoint.x - minWidthPx,
+              y: anchorPoint.y - minHeightPx,
+              width: minWidthPx,
+              height: minHeightPx,
+            };
+            break;
+        }
+      }
+
+      draft.x = Math.max(0, Math.min(draft.x, boundingBox.width - draft.width));
+      draft.y = Math.max(0, Math.min(draft.y, boundingBox.height - draft.height));
+
+      if (!isValidCropPosition(draft, polygon)) {
+        draft = constrainCropToValidArea(draft, polygon, slotAspectRatio);
+      }
+
+      nextCrop = draft;
+    }
+
+    const percentageCrop = cropToPercentage(nextCrop, boundingBox);
+    updateValue('cropX', percentageCrop.x);
+    updateValue('cropY', percentageCrop.y);
+    updateValue('cropWidth', percentageCrop.width);
+    updateValue('cropHeight', percentageCrop.height);
+  }, [cropDragType, cropDragStart, cropStartPixels, image, localState.rotation, stageSize.width, stageSize.height, displayScale, boundingBox, slotAspectRatio, updateValue]);
+
+  // Handle crop drag end
+  const handleCropDragEnd = useCallback(() => {
+    setCropDragType(null);
+    setCropStartPixels(null);
+  }, []);
+
+  // Stage mouse handlers
+  const handleStageMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+    const stage = e.target.getStage();
+    if (!stage) return;
     
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const pos = stage.getPointerPosition();
+    if (!pos) return;
     
-    if (isDragging) {
-      setPan({ x: x - dragStart.x, y: y - dragStart.y });
+    const x = pos.x - STAGE_PADDING;
+    const y = pos.y - STAGE_PADDING;
+    const handleSize = 15;
+    
+    if (
+      x < -handleSize ||
+      y < -handleSize ||
+      x > stageSize.width + handleSize ||
+      y > stageSize.height + handleSize
+    ) {
       return;
     }
+
+    const cropX = displayCrop.x;
+    const cropY = displayCrop.y;
+    const cropW = displayCrop.width;
+    const cropH = displayCrop.height;
     
-    if (!cropDragType || !cropStartState) return;
+    if (Math.abs(x - cropX) < handleSize && Math.abs(y - cropY) < handleSize) {
+      handleCropDragStart('nw', x, y);
+    } else if (Math.abs(x - (cropX + cropW)) < handleSize && Math.abs(y - cropY) < handleSize) {
+      handleCropDragStart('ne', x, y);
+    } else if (Math.abs(x - cropX) < handleSize && Math.abs(y - (cropY + cropH)) < handleSize) {
+      handleCropDragStart('sw', x, y);
+    } else if (Math.abs(x - (cropX + cropW)) < handleSize && Math.abs(y - (cropY + cropH)) < handleSize) {
+      handleCropDragStart('se', x, y);
+    } else if (x > cropX && x < cropX + cropW && y > cropY && y < cropY + cropH) {
+      handleCropDragStart('move', x, y);
+    }
+  }, [displayCrop, handleCropDragStart, stageSize.width, stageSize.height]);
+
+  const handleStageMouseMove = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (!cropDragType) return;
     
-      const baseScale = Math.max(canvas.width / image.width, canvas.height / image.height);
-      const scale = baseScale * zoom;
-      const imgWidth = image.width * scale;
-      const imgHeight = image.height * scale;
-      
-      const dx = ((x - cropDragStart.x) / imgWidth) * 100;
-      const dy = ((y - cropDragStart.y) / imgHeight) * 100;
-      
-      if (cropDragType === 'move') {
-        let newX = cropStartState.x + dx;
-        let newY = cropStartState.y + dy;
-      newX = Math.max(0, Math.min(100 - localState.cropWidth, newX));
-      newY = Math.max(0, Math.min(100 - localState.cropHeight, newY));
-      setLocalState(prev => ({ ...prev, cropX: newX, cropY: newY }));
-      } else {
-        let newCrop = { ...cropStartState };
-        const aspectDelta = Math.max(Math.abs(dx), Math.abs(dy) * slotAspectRatio);
-        const signX = cropDragType.includes('e') ? 1 : -1;
-        const dw = signX * (dx > 0 ? aspectDelta : -aspectDelta);
-        const dh = dw / slotAspectRatio;
-        
-        if (cropDragType === 'nw') {
-          newCrop.x = cropStartState.x - dw;
-          newCrop.y = cropStartState.y - dh;
-          newCrop.width = cropStartState.width + dw;
-          newCrop.height = cropStartState.height + dh;
-        } else if (cropDragType === 'ne') {
-          newCrop.y = cropStartState.y - dh;
-          newCrop.width = cropStartState.width + dw;
-          newCrop.height = cropStartState.height + dh;
-        } else if (cropDragType === 'sw') {
-          newCrop.x = cropStartState.x - dw;
-          newCrop.width = cropStartState.width + dw;
-          newCrop.height = cropStartState.height + dh;
-        } else if (cropDragType === 'se') {
-          newCrop.width = cropStartState.width + dw;
-          newCrop.height = cropStartState.height + dh;
-        }
-        
-        newCrop.width = Math.max(10, Math.min(100, newCrop.width));
-        newCrop.height = newCrop.width / slotAspectRatio;
-        newCrop.x = Math.max(0, Math.min(100 - newCrop.width, newCrop.x));
-        newCrop.y = Math.max(0, Math.min(100 - newCrop.height, newCrop.y));
-        
-      setLocalState(prev => ({
-        ...prev,
-        cropX: newCrop.x,
-        cropY: newCrop.y,
-        cropWidth: newCrop.width,
-        cropHeight: newCrop.height,
-      }));
+    const stage = e.target.getStage();
+    if (!stage) return;
+    
+    const pos = stage.getPointerPosition();
+    if (!pos) return;
+    
+    handleCropDragMove(pos.x, pos.y);
+  }, [cropDragType, handleCropDragMove]);
+
+  const handleStageMouseUp = useCallback(() => {
+    handleCropDragEnd();
+  }, [handleCropDragEnd]);
+
+  const handleStageWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
+    e.evt.preventDefault();
+
+    if (!image) return;
+
+    const deltaY = e.evt.deltaY;
+    const scaleFactor = deltaY < 0 ? 0.95 : 1.05;
+
+    const polygon = getRotatedImagePolygon(image.width, image.height, localState.rotation);
+    const cropPixels = percentageToCrop(
+      {
+        x: localState.cropX,
+        y: localState.cropY,
+        width: localState.cropWidth,
+        height: localState.cropHeight,
+      },
+      boundingBox
+    );
+
+    let scaled = scaleCropFromCenter(cropPixels, scaleFactor);
+
+    const minWidthPx = (MIN_CROP_PERCENT / 100) * boundingBox.width;
+    const maxWidthPx = boundingBox.width;
+    const clampedWidth = Math.min(Math.max(scaled.width, minWidthPx), maxWidthPx);
+    const clampedHeight = clampedWidth / slotAspectRatio;
+
+    if (clampedWidth !== scaled.width) {
+      const centerX = scaled.x + scaled.width / 2;
+      const centerY = scaled.y + scaled.height / 2;
+      scaled = {
+        x: centerX - clampedWidth / 2,
+        y: centerY - clampedHeight / 2,
+        width: clampedWidth,
+        height: clampedHeight,
+      };
     }
-  }, [isDragging, dragStart, cropDragType, cropDragStart, cropStartState, zoom, image, localState.cropWidth, localState.cropHeight, slotAspectRatio]);
 
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-    setCropDragType(null);
-    setCropStartState(null);
-  }, []);
+    scaled = fitCropToAspectRatio(scaled, slotAspectRatio, 'center');
 
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setZoom(prev => Math.max(0.5, Math.min(3, prev + delta)));
-  }, []);
+    scaled.x = Math.max(0, Math.min(scaled.x, boundingBox.width - scaled.width));
+    scaled.y = Math.max(0, Math.min(scaled.y, boundingBox.height - scaled.height));
 
-  // Preset handlers - exclusive toggle behavior
-  const handleBlackWhitePreset = () => {
-    if (activePreset === 'blackWhite') {
-      // If already active, clear the preset
-      handleClearPreset();
-    } else {
-      // Activate Black & White: sets saturation to -100, clears other preset values
-      setLocalState(prev => ({
-        ...prev,
-        saturation: -100,
-        temperature: 0,
-        brightness: 0,
-        monochromeColor: undefined,
-      }));
+    if (!isValidCropPosition(scaled, polygon)) {
+      scaled = constrainCropToValidArea(scaled, polygon, slotAspectRatio);
     }
-  };
 
-  const handleSepiaPreset = () => {
-    if (activePreset === 'sepia') {
-      // If already active, clear the preset
-      handleClearPreset();
-    } else {
-      // Activate Sepia: sets temperature, saturation, brightness
-      setLocalState(prev => ({
-        ...prev,
-        temperature: 30,
-        saturation: -50,
-        brightness: 10,
-        monochromeColor: undefined,
-      }));
+    const percentageCrop = cropToPercentage(scaled, boundingBox);
+    updateValue('cropX', percentageCrop.x);
+    updateValue('cropY', percentageCrop.y);
+    updateValue('cropWidth', percentageCrop.width);
+    updateValue('cropHeight', percentageCrop.height);
+  }, [image, localState.cropX, localState.cropY, localState.cropWidth, localState.cropHeight, localState.rotation, boundingBox, slotAspectRatio, updateValue]);
+
+  // Handle rotation change with crop constraint
+  const handleRotationChange = useCallback((newRotation: number) => {
+    // updateValue handles crop constraint automatically when rotation changes
+    updateValue('rotation', newRotation);
+  }, [updateValue]);
+
+  // Handle monochrome color change with preset activation
+  const handleMonochromeColorChange = useCallback((color: string) => {
+    updateValue('monochromeColor', color);
+    // Activate monochrome preset and deactivate others
+    if (!localState.monochromeEnabled) {
+      togglePreset('monochrome');
     }
-  };
+  }, [updateValue, togglePreset, localState.monochromeEnabled]);
 
-  const handleMonochromePreset = (color: string) => {
-    if (activePreset === 'monochrome' && localState.monochromeColor === color) {
-      // If same color is already active, clear the preset
-      handleClearPreset();
-    } else {
-      // Activate Monochrome with the chosen color, reset saturation and other preset values
-      setLocalState(prev => ({
-        ...prev,
-        saturation: 0,
-        temperature: 0,
-        brightness: 0,
-        monochromeColor: color,
-      }));
-    }
-  };
-
-  const handleClearPreset = () => {
-    setLocalState(prev => ({
-      ...prev,
-      saturation: 0,
-      temperature: 0,
-      brightness: 0,
-      monochromeColor: undefined,
-    }));
-  };
-
-  // Reset all - clears all adjustments, rotation, mirror, and active preset
-  const handleResetAll = () => {
-    setLocalState(prev => ({
-      brightness: 0,
-      contrast: 0,
-      saturation: 0,
-      hue: 0,
-      temperature: 0,
-      tint: 0,
-      mirrorX: false,
-      rotation: 0,
-      monochromeColor: undefined,
-      cropX: prev.cropX, // Keep crop
-      cropY: prev.cropY,
-      cropWidth: prev.cropWidth,
-      cropHeight: prev.cropHeight,
-    }));
-  };
-
-  // Save
-  const handleSave = () => {
-    onUpdate({
-      brightness: localState.brightness,
-      contrast: localState.contrast,
-      saturation: localState.saturation,
-      hue: localState.hue,
-      temperature: localState.temperature,
-      tint: localState.tint,
-      mirrorX: localState.mirrorX,
-      rotation: localState.rotation,
-      monochromeColor: localState.monochromeColor,
-      cropX: localState.cropX,
-      cropY: localState.cropY,
-      cropWidth: localState.cropWidth,
-      cropHeight: localState.cropHeight,
-    });
-    onClose();
-  };
+  // Save handler - use getAssignment from hook
+  const handleSave = useCallback(() => {
+    onSave(getAssignment());
+  }, [getAssignment, onSave]);
 
   // Escape key handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCancel();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [onCancel]);
 
-  // Check if there are any changes from original state
-  const hasChanges = 
-    localState.brightness !== (assignment.brightness ?? 0) ||
-    localState.contrast !== (assignment.contrast ?? 0) ||
-    localState.saturation !== (assignment.saturation ?? 0) ||
-    localState.hue !== (assignment.hue ?? 0) ||
-    localState.temperature !== (assignment.temperature ?? 0) ||
-    localState.tint !== (assignment.tint ?? 0) ||
-    localState.mirrorX !== (assignment.mirrorX ?? false) ||
-    localState.rotation !== (assignment.rotation ?? 0) ||
-    localState.monochromeColor !== assignment.monochromeColor ||
-    localState.cropX !== (assignment.cropX ?? 0) ||
-    localState.cropY !== (assignment.cropY ?? 0) ||
-    localState.cropWidth !== (assignment.cropWidth ?? 100) ||
-    localState.cropHeight !== (assignment.cropHeight ?? 100);
+  // Check for preset disabled sliders (Task 11.5)
+  const isColorPresetActive = localState.blackWhiteEnabled || localState.sepiaEnabled || localState.monochromeEnabled;
+  const disabledTooltip = isColorPresetActive 
+    ? `No effect while ${localState.blackWhiteEnabled ? 'Black & White' : localState.sepiaEnabled ? 'Sepia' : 'Monochrome'} is active`
+    : undefined;
+
+  // Render error state
+  if (loadError) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center">
+        <div className="text-red-500 mb-4">{loadError}</div>
+        <Button onClick={onCancel}>Close</Button>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/90 flex flex-col">
-      {/* Minimal Header - Cancel (left) and Save (right) only */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-border/50 bg-background/50 backdrop-blur-sm">
-        <Button variant="ghost" onClick={onClose}>
+      {/* Header - Task 11.6: Cancel and Save buttons on the right */}
+      <div className="flex items-center justify-end px-6 py-3 border-b border-border/50 bg-background/50 backdrop-blur-sm gap-2">
+        <Button variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
         <Button onClick={handleSave}>
@@ -563,15 +618,15 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar - Fixed width ~320px */}
+        {/* Left Sidebar - Controls */}
         <div className="w-80 bg-background/80 backdrop-blur-sm border-r border-border/50 overflow-y-auto">
           <div className="p-4 space-y-6">
-            {/* Mirror/Flip - Icon-only button at top */}
+            {/* Mirror/Flip */}
             <div>
               <Button
                 variant={localState.mirrorX ? "default" : "outline"}
                 size="sm"
-                onClick={() => setLocalState(prev => ({ ...prev, mirrorX: !prev.mirrorX }))}
+                onClick={toggleMirror}
                 className="w-10 h-10 p-0"
                 title="Flip Horizontal"
               >
@@ -579,52 +634,46 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
               </Button>
             </div>
 
-            {/* Filter Presets - Exclusive toggle behavior */}
+            {/* Task 11.4: Filter Presets with mutual exclusivity */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Filter Presets</label>
               <div className="flex flex-wrap gap-2">
                 <Button
-                  variant={activePreset === 'blackWhite' ? "default" : "outline"}
+                  variant={localState.blackWhiteEnabled ? "default" : "outline"}
                   size="sm"
-                  onClick={handleBlackWhitePreset}
+                  onClick={() => togglePreset('blackWhite')}
                   className="h-8 text-xs"
                 >
                   Black & White
                 </Button>
                 <Button
-                  variant={activePreset === 'sepia' ? "default" : "outline"}
+                  variant={localState.sepiaEnabled ? "default" : "outline"}
                   size="sm"
-                  onClick={handleSepiaPreset}
+                  onClick={() => togglePreset('sepia')}
                   className="h-8 text-xs"
                 >
                   Sepia
                 </Button>
                 <div className="flex items-center gap-1">
                   <Button
-                    variant={activePreset === 'monochrome' ? "default" : "outline"}
+                    variant={localState.monochromeEnabled ? "default" : "outline"}
                     size="sm"
-                    onClick={() => {
-                      if (activePreset === 'monochrome') {
-                        handleClearPreset();
-                      } else {
-                        handleMonochromePreset(localState.monochromeColor || '#3b82f6');
-                      }
-                    }}
+                    onClick={() => togglePreset('monochrome')}
                     className="h-8 text-xs"
                   >
                     Monochrome
                   </Button>
-                  {/* Always-visible color swatch for Monochrome */}
                   <Popover>
                     <PopoverTrigger asChild>
                       <button
                         className={`w-8 h-8 rounded border-2 flex items-center justify-center transition-opacity ${
-                          activePreset === 'monochrome' 
+                          localState.monochromeEnabled 
                             ? 'border-foreground opacity-100' 
                             : 'border-muted opacity-50 hover:opacity-75'
                         }`}
-                        style={{ backgroundColor: localState.monochromeColor || '#3b82f6' }}
+                        style={{ backgroundColor: localState.monochromeColor }}
                         title="Select Monochrome Color"
+                        disabled={localState.blackWhiteEnabled || localState.sepiaEnabled}
                       >
                         <Palette className="h-4 w-4 text-white drop-shadow" />
                       </button>
@@ -640,14 +689,14 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
                                 localState.monochromeColor === color ? 'border-foreground' : 'border-transparent'
                               }`}
                               style={{ backgroundColor: color }}
-                              onClick={() => handleMonochromePreset(color)}
+                              onClick={() => handleMonochromeColorChange(color)}
                             />
                           ))}
                         </div>
                         <Input
                           type="color"
-                          value={localState.monochromeColor || '#3b82f6'}
-                          onChange={(e) => handleMonochromePreset(e.target.value)}
+                          value={localState.monochromeColor}
+                          onChange={(e) => handleMonochromeColorChange(e.target.value)}
                           className="h-8 w-full cursor-pointer"
                         />
                       </div>
@@ -655,9 +704,9 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
                   </Popover>
                 </div>
               </div>
-          </div>
+            </div>
           
-            {/* Detailed Adjustments - Brightness, Contrast, Saturation, Hue, Temperature, Tint */}
+            {/* Task 11.2/11.3: Adjustments using AdjustmentSlider with eye icons and reset buttons */}
             <div className="space-y-3">
               <label className="text-sm font-medium text-foreground">Adjustments</label>
               
@@ -665,58 +714,94 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
                 label="Brightness"
                 icon={<Sun className="h-4 w-4" />}
                 value={localState.brightness}
-                onChange={(v) => setLocalState(prev => ({ ...prev, brightness: v }))}
+                enabled={localState.brightnessEnabled}
+                globalEnabled={localState.filtersEnabled}
                 min={-100}
                 max={100}
+                onValueChange={(v) => updateValue('brightness', v)}
+                onToggle={() => toggleEnabled('brightnessEnabled')}
+                onReset={() => updateValue('brightness', 0)}
               />
               
               <AdjustmentSlider
                 label="Contrast"
                 icon={<ContrastIcon />}
                 value={localState.contrast}
-                onChange={(v) => setLocalState(prev => ({ ...prev, contrast: v }))}
+                enabled={localState.contrastEnabled}
+                globalEnabled={localState.filtersEnabled}
                 min={-100}
                 max={100}
+                onValueChange={(v) => updateValue('contrast', v)}
+                onToggle={() => toggleEnabled('contrastEnabled')}
+                onReset={() => updateValue('contrast', 0)}
               />
               
+              {/* Task 11.5: Saturation disabled when color preset active */}
               <AdjustmentSlider
                 label="Saturation"
                 icon={<SaturationIcon />}
                 value={localState.saturation}
-                onChange={(v) => setLocalState(prev => ({ ...prev, saturation: v }))}
+                enabled={localState.saturationEnabled}
+                globalEnabled={localState.filtersEnabled}
                 min={-100}
                 max={100}
+                disabled={isColorPresetActive}
+                disabledTooltip={disabledTooltip}
+                onValueChange={(v) => updateValue('saturation', v)}
+                onToggle={() => toggleEnabled('saturationEnabled')}
+                onReset={() => updateValue('saturation', 0)}
               />
               
+              {/* Task 11.5: Hue disabled when color preset active */}
               <AdjustmentSlider
                 label="Hue"
                 icon={<HueIcon />}
                 value={localState.hue}
-                onChange={(v) => setLocalState(prev => ({ ...prev, hue: v }))}
+                enabled={localState.hueEnabled}
+                globalEnabled={localState.filtersEnabled}
                 min={-180}
                 max={180}
+                disabled={isColorPresetActive}
+                disabledTooltip={disabledTooltip}
+                onValueChange={(v) => updateValue('hue', v)}
+                onToggle={() => toggleEnabled('hueEnabled')}
+                onReset={() => updateValue('hue', 0)}
               />
               
+              {/* Task 11.5: Temperature disabled when color preset active */}
               <AdjustmentSlider
                 label="Temperature"
                 icon={<TemperatureIcon />}
                 value={localState.temperature}
-                onChange={(v) => setLocalState(prev => ({ ...prev, temperature: v }))}
+                enabled={localState.temperatureEnabled}
+                globalEnabled={localState.filtersEnabled}
                 min={-100}
                 max={100}
+                disabled={isColorPresetActive}
+                disabledTooltip={disabledTooltip}
+                onValueChange={(v) => updateValue('temperature', v)}
+                onToggle={() => toggleEnabled('temperatureEnabled')}
+                onReset={() => updateValue('temperature', 0)}
               />
               
+              {/* Task 11.5: Tint disabled when color preset active */}
               <AdjustmentSlider
                 label="Tint"
                 icon={<TintIcon />}
                 value={localState.tint}
-                onChange={(v) => setLocalState(prev => ({ ...prev, tint: v }))}
+                enabled={localState.tintEnabled}
+                globalEnabled={localState.filtersEnabled}
                 min={-100}
                 max={100}
+                disabled={isColorPresetActive}
+                disabledTooltip={disabledTooltip}
+                onValueChange={(v) => updateValue('tint', v)}
+                onToggle={() => toggleEnabled('tintEnabled')}
+                onReset={() => updateValue('tint', 0)}
               />
             </div>
 
-            {/* Rotation - Slider + numeric input (range -180.0 to 180.0, step 0.1) */}
+            {/* Rotation */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Rotation</label>
               <div className="flex items-center gap-2">
@@ -725,7 +810,7 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
                 </div>
                 <Slider
                   value={[localState.rotation]}
-                  onValueChange={([v]) => setLocalState(prev => ({ ...prev, rotation: v }))}
+                  onValueChange={([v]) => handleRotationChange(v)}
                   min={-180}
                   max={180}
                   step={0.1}
@@ -736,7 +821,7 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
                   value={localState.rotation.toFixed(1)}
                   onChange={(e) => {
                     const v = parseFloat(e.target.value) || 0;
-                    setLocalState(prev => ({ ...prev, rotation: Math.max(-180, Math.min(180, v)) }));
+                    handleRotationChange(Math.max(-180, Math.min(180, v)));
                   }}
                   min={-180}
                   max={180}
@@ -752,8 +837,7 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleResetAll}
-                disabled={!hasChanges}
+                onClick={hookResetAll}
                 className="w-full"
               >
                 <RotateCcw className="h-4 w-4 mr-2" />
@@ -763,63 +847,144 @@ export function SlotEditorModal({ assignment, slot, onUpdate, onClose }: SlotEdi
           </div>
         </div>
 
-        {/* Main Area - Canvas filling remaining space */}
+        {/* Main Canvas Area */}
         <div 
           ref={containerRef}
           className="flex-1 flex items-center justify-center p-5 bg-black/50"
         >
-          <canvas
-            ref={canvasRef}
-            width={canvasSize.width}
-            height={canvasSize.height}
-            className="cursor-move shadow-2xl rounded"
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onWheel={handleWheel}
-          />
+          {image && checkerboardPattern && (
+            <Stage
+              width={stageWidth}
+              height={stageHeight}
+              onMouseDown={handleStageMouseDown}
+              onMouseMove={handleStageMouseMove}
+              onMouseUp={handleStageMouseUp}
+              onMouseLeave={handleStageMouseUp}
+              onWheel={handleStageWheel}
+              style={{ cursor: stageCursor }}
+            >
+              {/* Background Layer - Checkerboard pattern */}
+              <Layer>
+                <Rect
+                  width={stageWidth}
+                  height={stageHeight}
+                  fillPatternImage={checkerboardPattern}
+                  fillPatternRepeat="repeat"
+                />
+              </Layer>
+
+              {/* Image Layer - Rotated image with filters */}
+              <Layer x={STAGE_PADDING} y={STAGE_PADDING}>
+                <KonvaImage
+                  ref={(node) => {
+                    imageNodeRef.current = node;
+                    if (node) {
+                      applyFilters(node, currentAssignment);
+                      node.cache();
+                    }
+                  }}
+                  image={image}
+                  x={stageSize.width / 2}
+                  y={stageSize.height / 2}
+                  width={image.width * displayScale}
+                  height={image.height * displayScale}
+                  offsetX={(image.width * displayScale) / 2}
+                  offsetY={(image.height * displayScale) / 2}
+                  rotation={localState.rotation}
+                  scaleX={localState.mirrorX ? -1 : 1}
+                />
+              </Layer>
+
+              {/* Overlay Layer - Dark overlay with crop cutout */}
+              <Layer>
+                <Shape
+                  sceneFunc={(context, shape) => {
+                    const ctx = context._context;
+                    
+                    // Draw dark overlay over entire stage
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                    ctx.fillRect(0, 0, stageWidth, stageHeight);
+                    
+                    // Cut out the crop area using destination-out composite
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.fillStyle = 'white';
+                    ctx.fillRect(
+                      displayCrop.x + STAGE_PADDING,
+                      displayCrop.y + STAGE_PADDING,
+                      displayCrop.width,
+                      displayCrop.height
+                    );
+                    
+                    // Reset composite operation
+                    ctx.globalCompositeOperation = 'source-over';
+                    
+                    context.fillStrokeShape(shape);
+                  }}
+                  listening={false}
+                />
+              </Layer>
+
+              {/* Crop UI Layer - Border and corner handles */}
+              <Layer x={STAGE_PADDING} y={STAGE_PADDING}>
+                {/* Crop border */}
+                <Rect
+                  x={displayCrop.x}
+                  y={displayCrop.y}
+                  width={displayCrop.width}
+                  height={displayCrop.height}
+                  stroke="#3b82f6"
+                  strokeWidth={2}
+                  listening={false}
+                />
+                
+                {/* Rule of thirds grid */}
+                {[1, 2].map((i) => (
+                  <Group key={`grid-${i}`}>
+                    {/* Vertical lines */}
+                    <Rect
+                      x={displayCrop.x + (displayCrop.width * i) / 3}
+                      y={displayCrop.y}
+                      width={1}
+                      height={displayCrop.height}
+                      fill="rgba(255, 255, 255, 0.3)"
+                      listening={false}
+                    />
+                    {/* Horizontal lines */}
+                    <Rect
+                      x={displayCrop.x}
+                      y={displayCrop.y + (displayCrop.height * i) / 3}
+                      width={displayCrop.width}
+                      height={1}
+                      fill="rgba(255, 255, 255, 0.3)"
+                      listening={false}
+                    />
+                  </Group>
+                ))}
+                
+                {/* Corner handles */}
+                {[
+                  { x: displayCrop.x, y: displayCrop.y, cursor: 'nw-resize' },
+                  { x: displayCrop.x + displayCrop.width, y: displayCrop.y, cursor: 'ne-resize' },
+                  { x: displayCrop.x, y: displayCrop.y + displayCrop.height, cursor: 'sw-resize' },
+                  { x: displayCrop.x + displayCrop.width, y: displayCrop.y + displayCrop.height, cursor: 'se-resize' },
+                ].map((handle, i) => (
+                  <Rect
+                    key={`handle-${i}`}
+                    x={handle.x - 6}
+                    y={handle.y - 6}
+                    width={12}
+                    height={12}
+                    fill="#3b82f6"
+                    stroke="#ffffff"
+                    strokeWidth={1}
+                    listening={false}
+                  />
+                ))}
+              </Layer>
+            </Stage>
+          )}
         </div>
       </div>
-    </div>
-  );
-}
-
-// Adjustment slider component
-interface AdjustmentSliderProps {
-  label: string;
-  icon: React.ReactNode;
-  value: number;
-  onChange: (value: number) => void;
-  min: number;
-  max: number;
-}
-
-function AdjustmentSlider({ label, icon, value, onChange, min, max }: AdjustmentSliderProps) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="w-6 h-6 flex items-center justify-center flex-shrink-0" title={label}>
-        {icon}
-      </div>
-      <Slider
-        value={[value]}
-        onValueChange={([v]) => onChange(v)}
-        min={min}
-        max={max}
-        step={1}
-        className="flex-1"
-      />
-      <Input
-        type="number"
-        value={value}
-        onChange={(e) => {
-          const newVal = parseInt(e.target.value, 10);
-          if (!isNaN(newVal)) onChange(Math.max(min, Math.min(max, newVal)));
-        }}
-        min={min}
-        max={max}
-        className="w-14 h-7 text-xs text-center px-1"
-      />
     </div>
   );
 }

@@ -221,7 +221,7 @@ async def sync_reset_mode(
                 })
         
         # Get all app-managed mappings (gallery_image_id is not null)
-        all_mappings = await db_client.get_tv_content_mappings(page=1, limit=10000)
+        all_mappings = await db_client.get_tv_content_mappings(page=1, limit=1000)
         app_managed_mappings = [
             m for m in all_mappings if m.get("gallery_image_id") is not None
         ]

@@ -2,14 +2,18 @@
 FastAPI sync service for syncing images to Samsung Frame TV.
 """
 
-import os
 import logging
+import os
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from models import (
+    DeleteRequest,
+    DeleteResponse,
+    FailedDelete,
+    FailedImage,
     SyncRequest,
     SyncResponse,
-    FailedImage,
 )
 
 # Initialize TV mocking if MOCK_TV is enabled (must happen before importing tv_sync)
@@ -21,10 +25,11 @@ if os.getenv("MOCK_TV", "").lower() == "true":
         "TV mocking enabled via MOCK_TV environment variable"
     )
 
-from tv_sync import sync_images_to_tv  # noqa: E402
-from tv_refresh import refresh_tv_state  # noqa: E402
-from tv_sync_smart import sync_add_mode, sync_reset_mode  # noqa: E402
 from database_client import DatabaseClient  # noqa: E402
+from samsungtvws.async_art import SamsungTVAsyncArt  # noqa: E402
+from tv_refresh import get_data_dir, get_token_file_path, get_thumbnails_dir, refresh_tv_state  # noqa: E402
+from tv_sync import sync_images_to_tv  # noqa: E402
+from tv_sync_smart import sync_add_mode, sync_reset_mode  # noqa: E402
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -79,9 +84,15 @@ async def sync(request: SyncRequest):
                 f"Smart sync ({request.mode} mode) for {len(request.gallery_image_ids)} "
                 f"gallery images to {request.ip_address}:{request.port}"
             )
-            
+
             if request.mode == "reset":
-                success, synced, failed_dicts, total, successful = await sync_reset_mode(
+                (
+                    success,
+                    synced,
+                    failed_dicts,
+                    total,
+                    successful,
+                ) = await sync_reset_mode(
                     request.gallery_image_ids,
                     request.ip_address,
                     request.port,
@@ -98,7 +109,7 @@ async def sync(request: SyncRequest):
                 f"Legacy sync for {len(request.image_paths)} images "
                 f"to {request.ip_address}:{request.port}"
             )
-            
+
             success, synced, failed_dicts, total, successful = await sync_images_to_tv(
                 request.image_paths,
                 request.ip_address,
@@ -134,15 +145,16 @@ async def refresh_tv():
             settings = await db_client.get_settings()
             ip_address = settings.get("tv_ip_address")
             port = settings.get("tv_port", 8002)
-            
+
             if not ip_address:
                 raise HTTPException(
                     status_code=400,
-                    detail="TV IP address not configured. Please set it in Settings."
+                    detail="TV IP address not configured. Please set it in Settings.",
                 )
         finally:
             await db_client.close()
-        
+        logger.info(f"Refreshing TV state for {ip_address}:{port}")
+
         result = await refresh_tv_state(ip_address, port)
         return result
     except HTTPException:
@@ -150,6 +162,100 @@ async def refresh_tv():
     except Exception as e:
         logger.error(f"Error in refresh TV state endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Refresh error: {str(e)}")
+
+
+@app.post("/tv-content/delete", response_model=DeleteResponse)
+async def delete_tv_content(request: DeleteRequest):
+    """
+    Delete images from TV one at a time.
+    
+    For each successful TV deletion:
+    - Deletes the database record
+    - Deletes the thumbnail file
+    
+    If a deletion fails, the database record and thumbnail are preserved.
+    """
+    db_client = DatabaseClient()
+    deleted: list[str] = []
+    failed: list[FailedDelete] = []
+    tv = None
+    
+    try:
+        # Get TV settings from database
+        settings = await db_client.get_settings()
+        ip_address = settings.get("tv_ip_address")
+        port = settings.get("tv_port", 8002)
+        
+        if not ip_address:
+            raise HTTPException(
+                status_code=400,
+                detail="TV IP address not configured. Please set it in Settings.",
+            )
+        
+        logger.info(f"Deleting {len(request.tv_content_ids)} images from TV at {ip_address}:{port}")
+        
+        # Connect to TV
+        token_file = get_token_file_path()
+        tv = SamsungTVAsyncArt(host=ip_address, port=port, token_file=token_file)
+        await tv.start_listening()
+        
+        if not tv.is_alive():
+            raise HTTPException(status_code=500, detail="Failed to connect to TV")
+        
+        # Check if TV is in art mode
+        if not await tv.in_artmode():
+            raise HTTPException(status_code=400, detail="TV is not in art mode")
+        
+        thumbnails_dir = get_thumbnails_dir()
+        
+        # Delete images one at a time
+        for tv_content_id in request.tv_content_ids:
+            try:
+                logger.info(f"Deleting {tv_content_id} from TV...")
+                
+                # Delete from TV (one at a time using delete_list with single item)
+                await tv.delete_list([tv_content_id])
+                logger.info(f"Successfully deleted {tv_content_id} from TV")
+                
+                # Delete from database
+                try:
+                    await db_client.delete_tv_content_by_tv_id(tv_content_id)
+                    logger.info(f"Deleted database record for {tv_content_id}")
+                except Exception as db_error:
+                    logger.warning(f"Failed to delete database record for {tv_content_id}: {db_error}")
+                
+                # Delete thumbnail
+                try:
+                    thumbnail_path = thumbnails_dir / f"{tv_content_id}.jpg"
+                    if thumbnail_path.exists():
+                        thumbnail_path.unlink()
+                        logger.info(f"Deleted thumbnail for {tv_content_id}")
+                except Exception as thumb_error:
+                    logger.warning(f"Failed to delete thumbnail for {tv_content_id}: {thumb_error}")
+                
+                deleted.append(tv_content_id)
+                
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Failed to delete {tv_content_id} from TV: {error_msg}")
+                failed.append(FailedDelete(tv_content_id=tv_content_id, error=error_msg))
+        
+        logger.info(f"Delete operation complete: {len(deleted)} deleted, {len(failed)} failed")
+        
+        return DeleteResponse(deleted=deleted, failed=failed)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in delete TV content endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Delete error: {str(e)}")
+    finally:
+        if tv is not None:
+            try:
+                await tv.close()
+            except Exception:
+                pass
+        await db_client.close()
 
 
 if __name__ == "__main__":

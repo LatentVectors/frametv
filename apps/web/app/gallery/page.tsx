@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Loader2, RefreshCw, CheckCircle2, Tag as TagIcon, X, ChevronDown, ChevronUp, Filter } from "lucide-react";
+import { Loader2, RefreshCw, CheckCircle2, Tag as TagIcon, X, ChevronDown, ChevronUp, Filter, MoreVertical, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Navigation } from "@/components/Navigation";
@@ -9,24 +9,41 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { SyncModal } from "@/components/SyncModal";
 import { TagFilter } from "@/components/TagInput";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { syncApi, tvContentApi, galleryImagesApi, tagsApi } from "@/lib/api";
 import { Tag } from "@/types";
 
 interface GalleryImage {
-  id?: number;
+  id: number;
   filename: string;
   filepath: string;
-  createdAt: string;
-  size: number;
+  template_id: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
   tags?: Tag[];
 }
 
 interface GalleryResponse {
-  images: GalleryImage[];
+  items: GalleryImage[];
   total: number;
   page: number;
-  limit: number;
-  hasMore: boolean;
+  pages: number;
 }
 
 interface TVContentMapping {
@@ -65,6 +82,8 @@ export default function GalleryPage() {
   const [tagInputValue, setTagInputValue] = useState("");
   const [tagSuggestions, setTagSuggestions] = useState<Tag[]>([]);
   const [addingTag, setAddingTag] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const observerTarget = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -85,31 +104,23 @@ export default function GalleryPage() {
         }
         setError(null);
 
-        let url = `/api/gallery?page=${pageNum}&limit=50`;
-        if (tagsFilter && tagsFilter.length > 0) {
-          url += `&tags=${encodeURIComponent(tagsFilter.join(","))}`;
-        }
-        
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error("Failed to load images");
-        }
-
-        const data: GalleryResponse = await response.json();
+        const tagsParam = tagsFilter && tagsFilter.length > 0 ? tagsFilter.join(",") : undefined;
+        const data = await galleryImagesApi.list(pageNum, 50, { tags: tagsParam }) as GalleryResponse;
 
         if (append) {
-          setImages((prev) => [...prev, ...data.images]);
+          setImages((prev) => [...prev, ...data.items]);
         } else {
-          setImages(data.images);
+          setImages(data.items);
         }
 
-        setHasMore(data.hasMore);
+        // Calculate hasMore from pages info
+        setHasMore(pageNum < data.pages);
         setPage(pageNum);
 
         // Load tags for each image
         const newImageTags = new Map<number, Tag[]>(append ? imageTags : undefined);
-        for (const image of data.images) {
-          if (image.id && !newImageTags.has(image.id)) {
+        for (const image of data.items) {
+          if (!newImageTags.has(image.id)) {
             try {
               const tags = await galleryImagesApi.getTags(image.id);
               newImageTags.set(image.id, tags);
@@ -131,7 +142,7 @@ export default function GalleryPage() {
 
   const loadTVMappings = useCallback(async () => {
     try {
-      const response = (await tvContentApi.list(1, 10000)) as {
+      const response = (await tvContentApi.list(1, 1000)) as {
         items?: TVContentMapping[];
       };
       const mappings = response.items || [];
@@ -177,6 +188,7 @@ export default function GalleryPage() {
 
   // Convert filepath to a URL that can be displayed
   const getImageUrl = (filepath: string) => {
+    // filepath from database is relative to data directory (e.g., "saved-images/filename.jpg")
     const filename = filepath.split(/[/\\]/).pop();
     return `/api/gallery/image?filename=${encodeURIComponent(filename || "")}`;
   };
@@ -354,6 +366,50 @@ export default function GalleryPage() {
     }
   }, [selectedImages, tvMappings, toast]);
 
+  const handleDeleteSelected = useCallback(async () => {
+    if (selectedImages.size === 0) return;
+
+    try {
+      setDeleting(true);
+      setDeleteDialogOpen(false);
+
+      const result = await galleryImagesApi.deleteMultiple(Array.from(selectedImages));
+
+      if (result.deleted > 0) {
+        // Remove deleted images from state
+        setImages((prev) => prev.filter((img) => !selectedImages.has(img.id)));
+        setImageTags((prev) => {
+          const newMap = new Map(prev);
+          selectedImages.forEach((id) => newMap.delete(id));
+          return newMap;
+        });
+        setSelectedImages(new Set());
+
+        toast({
+          title: "Images deleted",
+          description: `Successfully deleted ${result.deleted} ${result.deleted === 1 ? "image" : "images"}`,
+        });
+      }
+
+      if (result.failed > 0) {
+        toast({
+          title: "Some deletions failed",
+          description: `${result.failed} ${result.failed === 1 ? "image" : "images"} could not be deleted`,
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to delete images";
+      toast({
+        title: "Delete error",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  }, [selectedImages, toast]);
+
   // Calculate sync preview counts for modal
   const selectedGalleryIds = Array.from(selectedImages);
   const existingMappings = selectedGalleryIds.filter((id) =>
@@ -367,7 +423,7 @@ export default function GalleryPage() {
   // Filter images based on usage filter
   const filteredImages = images.filter((image) => {
     if (usageFilter === "all") return true;
-    const isOnTv = image.id ? tvMappings.has(image.id) : false;
+    const isOnTv = tvMappings.has(image.id);
     if (usageFilter === "onTv") return isOnTv;
     if (usageFilter === "notOnTv") return !isOnTv;
     return true;
@@ -375,8 +431,8 @@ export default function GalleryPage() {
 
   // Sort images based on sort order
   const sortedImages = [...filteredImages].sort((a, b) => {
-    const dateA = new Date(a.createdAt).getTime();
-    const dateB = new Date(b.createdAt).getTime();
+    const dateA = new Date(a.created_at).getTime();
+    const dateB = new Date(b.created_at).getTime();
     return sortOrder === "newest" ? dateB - dateA : dateA - dateB;
   });
 
@@ -446,10 +502,6 @@ export default function GalleryPage() {
         </Button>
         {selectedImages.size > 0 && (
           <>
-            <span className="text-sm text-muted-foreground">
-              {selectedImages.size} {selectedImages.size === 1 ? "image" : "images"}{" "}
-              selected
-            </span>
             <Button
               variant="default"
               onClick={() => setSyncModalOpen(true)}
@@ -461,11 +513,29 @@ export default function GalleryPage() {
                   Syncing...
                 </>
               ) : (
-                `Sync ${selectedImages.size} ${
-                  selectedImages.size === 1 ? "Image" : "Images"
-                }`
+                `Sync (${selectedImages.size})`
               )}
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" disabled={deleting}>
+                  {deleting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <MoreVertical className="h-4 w-4" />
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() => setDeleteDialogOpen(true)}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete ({selectedImages.size})
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         )}
         <ThemeToggle />
@@ -557,6 +627,27 @@ export default function GalleryPage() {
         removeCount={removeCount}
       />
 
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedImages.size} {selectedImages.size === 1 ? "image" : "images"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the selected {selectedImages.size === 1 ? "image" : "images"} from your gallery and remove the {selectedImages.size === 1 ? "file" : "files"} from disk.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteSelected}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Sync progress bar */}
       {syncing && (
         <div className="px-6 py-2 border-b border-border bg-muted">
@@ -592,13 +683,13 @@ export default function GalleryPage() {
               style={{ columnFill: "balance" }}
             >
               {sortedImages.map((image) => {
-                const isSelected = selectedImages.has(image.id || 0);
-                const isSynced = image.id && tvMappings.has(image.id);
-                const tags = imageTags.get(image.id || 0) || [];
+                const isSelected = selectedImages.has(image.id);
+                const isSynced = tvMappings.has(image.id);
+                const tags = imageTags.get(image.id) || [];
                 const isEditingTags = editingTagsForImage === image.id;
                 return (
                   <div
-                    key={image.id || image.filename}
+                    key={image.id}
                     className="mb-4 break-inside-avoid"
                   >
                     <div
@@ -607,7 +698,7 @@ export default function GalleryPage() {
                           ? "border-primary ring-2 ring-primary/20"
                           : "border-transparent hover:border-border"
                       }`}
-                      onClick={() => toggleImageSelection(image.id || 0)}
+                      onClick={() => toggleImageSelection(image.id)}
                     >
                       <img
                         src={getImageUrl(image.filepath)}
@@ -635,7 +726,7 @@ export default function GalleryPage() {
                         className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-background/80 hover:bg-background rounded-full p-1.5"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setEditingTagsForImage(isEditingTags ? null : image.id || null);
+                          setEditingTagsForImage(isEditingTags ? null : image.id);
                           setTagInputValue("");
                         }}
                       >
@@ -660,7 +751,7 @@ export default function GalleryPage() {
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleRemoveTag(image.id!, tag.id!);
+                                      handleRemoveTag(image.id, tag.id!);
                                     }}
                                     className="hover:bg-white/20 rounded-full p-0.5"
                                   >
@@ -683,7 +774,7 @@ export default function GalleryPage() {
                                 if (e.key === "Enter" && tagInputValue.trim()) {
                                   e.preventDefault();
                                   const randomColor = TAG_COLORS[Math.floor(Math.random() * TAG_COLORS.length)];
-                                  handleAddTag(image.id!, tagInputValue, randomColor);
+                                  handleAddTag(image.id, tagInputValue, randomColor);
                                 } else if (e.key === "Escape") {
                                   setEditingTagsForImage(null);
                                 }
@@ -700,7 +791,7 @@ export default function GalleryPage() {
                                     key={suggestion.id}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleAddTag(image.id!, suggestion.name, suggestion.color ?? undefined);
+                                      handleAddTag(image.id, suggestion.name, suggestion.color ?? undefined);
                                     }}
                                     className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-accent"
                                   >

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readSettings } from "@/lib/settingsUtils";
+import { settingsApi } from "@/lib/api/database";
 import path from "path";
 import { getSavedImagesDirectory } from "@/lib/dataUtils";
 
@@ -18,9 +18,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Read TV settings
-    const settings = readSettings();
-    if (!settings) {
+    // Read TV settings from database
+    const dbSettings = await settingsApi.getAll() as { settings?: Record<string, any> };
+    const tvIpAddress = dbSettings.settings?.tv_ip_address;
+    const tvPort = dbSettings.settings?.tv_port;
+    
+    if (!tvIpAddress) {
       return NextResponse.json(
         {
           success: false,
@@ -52,8 +55,8 @@ export async function POST(request: NextRequest) {
       },
       body: JSON.stringify({
         image_paths: fullImagePaths,
-        ip_address: settings.ipAddress,
-        port: settings.port,
+        ip_address: tvIpAddress,
+        port: tvPort || 8002,
       }),
     });
 

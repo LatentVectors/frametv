@@ -2,6 +2,7 @@
 API router for TVContentMapping endpoints.
 """
 
+from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
@@ -20,6 +21,37 @@ class PaginatedResponse(BaseModel):
     total: int
     page: int
     pages: int
+
+
+class TVContentCreate(BaseModel):
+    """Input model for creating TV content mappings."""
+    gallery_image_id: Optional[int] = None
+    tv_content_id: str
+    sync_status: str = "pending"
+    # TV metadata fields
+    category_id: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    matte_id: Optional[str] = None
+    portrait_matte_id: Optional[str] = None
+    image_date: Optional[str] = None
+    content_type: Optional[str] = None
+
+
+class TVContentUpdate(BaseModel):
+    """Input model for updating TV content mappings."""
+    gallery_image_id: Optional[int] = None
+    tv_content_id: Optional[str] = None
+    sync_status: Optional[str] = None
+    last_verified_at: Optional[datetime] = None
+    # TV metadata fields
+    category_id: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    matte_id: Optional[str] = None
+    portrait_matte_id: Optional[str] = None
+    image_date: Optional[str] = None
+    content_type: Optional[str] = None
 
 
 class RefreshRequest(BaseModel):
@@ -93,22 +125,36 @@ async def get_tv_content_by_gallery_image(
 
 @router.post("", response_model=TVContentMapping, status_code=201)
 async def create_tv_content(
-    mapping: TVContentMapping,
+    data: TVContentCreate,
     session: Session = Depends(get_session),
 ):
     """Create a new TV content mapping."""
     repo = TVContentRepository(session)
     # Check if tv_content_id already exists
-    existing = repo.get_by_tv_content_id(mapping.tv_content_id)
+    existing = repo.get_by_tv_content_id(data.tv_content_id)
     if existing:
         raise HTTPException(status_code=400, detail="TV content ID already exists")
+    
+    # Create TVContentMapping from input data
+    mapping = TVContentMapping(
+        gallery_image_id=data.gallery_image_id,
+        tv_content_id=data.tv_content_id,
+        sync_status=data.sync_status,
+        category_id=data.category_id,
+        width=data.width,
+        height=data.height,
+        matte_id=data.matte_id,
+        portrait_matte_id=data.portrait_matte_id,
+        image_date=data.image_date,
+        content_type=data.content_type,
+    )
     return repo.create(mapping)
 
 
 @router.put("/{id}", response_model=TVContentMapping)
 async def update_tv_content(
     id: int,
-    mapping: TVContentMapping,
+    data: TVContentUpdate,
     session: Session = Depends(get_session),
 ):
     """Update a TV content mapping."""
@@ -117,8 +163,9 @@ async def update_tv_content(
     if not existing:
         raise HTTPException(status_code=404, detail="TV content mapping not found")
     
-    # Update fields
-    for field, value in mapping.model_dump(exclude={"id"}).items():
+    # Update only provided fields
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
         setattr(existing, field, value)
     
     return repo.update(existing)
