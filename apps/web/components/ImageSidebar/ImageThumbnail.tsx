@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { ImageOff, CheckCircle2, Tag as TagIcon, X, Plus, Loader2 } from "lucide-react";
-import { ImageData, useSidebar } from "@/contexts/SidebarContext";
+import { ImageData } from "@/contexts/SidebarContext";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { sourceImagesApi, tagsApi } from "@/lib/api/database";
@@ -11,6 +11,7 @@ import { Tag } from "@/types";
 interface ImageThumbnailProps {
   image: ImageData;
   size: number;
+  onOpenModal: (image: ImageData) => void;
 }
 
 const TAG_COLORS = [
@@ -24,9 +25,10 @@ const TAG_COLORS = [
  * Shows visual indicator if image is used in a saved composition (usage_count > 0)
  * Shows tag icon on hover for managing tags
  * Preserves aspect ratio using object-contain
+ * 
+ * Memoized to prevent re-renders during scroll
  */
-export function ImageThumbnail({ image, size }: ImageThumbnailProps) {
-  const { openImageModal } = useSidebar();
+export const ImageThumbnail = React.memo(function ImageThumbnail({ image, size, onOpenModal }: ImageThumbnailProps) {
   const [imageError, setImageError] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -126,7 +128,7 @@ export function ImageThumbnail({ image, size }: ImageThumbnailProps) {
 
   const handleDoubleClick = () => {
     if (!imageError) {
-      openImageModal(image);
+      onOpenModal(image);
     }
   };
 
@@ -140,7 +142,7 @@ export function ImageThumbnail({ image, size }: ImageThumbnailProps) {
       onDoubleClick={handleDoubleClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className={`relative rounded-lg overflow-hidden cursor-move transition-all bg-muted group ${
+      className={`relative rounded-lg overflow-hidden cursor-move bg-muted group ${
         isDragging ? "opacity-50" : "opacity-100"
       } ${isUsed ? "border-2 border-blue-500" : "border-2 border-transparent hover:border-primary"}`}
       style={{ 
@@ -300,4 +302,4 @@ export function ImageThumbnail({ image, size }: ImageThumbnailProps) {
       </div>
     </div>
   );
-}
+});
