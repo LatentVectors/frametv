@@ -81,7 +81,7 @@ async def sync_add_mode(
     """
     Add Mode: Upload only new gallery images that don't already exist on TV.
     Preserves all existing images on TV (including manually uploaded).
-    
+
     Returns:
         Tuple of (success, synced_filenames, failed_images, total, successful_count)
     """
@@ -89,7 +89,7 @@ async def sync_add_mode(
     token_file = get_token_file_path()
     synced = []
     failed = []
-    
+
     try:
         # Get gallery images from database
         gallery_images = []
@@ -98,53 +98,54 @@ async def sync_add_mode(
             if image:
                 gallery_images.append(image)
             else:
-                failed.append({
-                    "filename": f"ID:{gallery_image_id}",
-                    "error": "Gallery image not found in database"
-                })
-        
+                failed.append(
+                    {
+                        "filename": f"ID:{gallery_image_id}",
+                        "error": "Gallery image not found in database",
+                    }
+                )
+
         if not gallery_images:
             return (False, [], failed, len(gallery_image_ids), 0)
-        
+
         # Check which images are already on TV
         images_to_upload = []
         for image in gallery_images:
             mapping = await db_client.get_tv_content_by_gallery_image_id(image["id"])
             if not mapping:
                 images_to_upload.append(image)
-        
+
         if not images_to_upload:
             logger.info("All selected images are already on TV")
             return (True, [], [], len(gallery_image_ids), 0)
-        
+
         # Connect to TV
         tv = SamsungTVAsyncArt(host=ip_address, port=port, token_file=token_file)
         await tv.start_listening()
-        
+
         if not tv.is_alive():
             raise Exception("Failed to connect to TV")
-        
+
         if not await tv.in_artmode():
             await tv.close()
             raise Exception("TV is not in art mode")
-        
+
         # Upload new images
         data_dir = get_data_dir()
         for image in images_to_upload:
             # Construct full filepath
             relative_path = image["filepath"]
             file_path = data_dir / relative_path
-            
+
             if not file_path.exists():
-                failed.append({
-                    "filename": image["filename"],
-                    "error": "File not found"
-                })
+                failed.append(
+                    {"filename": image["filename"], "error": "File not found"}
+                )
                 continue
-            
+
             # Upload to TV
             content_id = await upload_file(tv, file_path, matte="none")
-            
+
             if content_id:
                 # Create TVContentMapping record
                 try:
@@ -158,22 +159,23 @@ async def sync_add_mode(
                     await db_client.create_tv_content_mapping(mapping)
                     synced.append(image["filename"])
                 except Exception as e:
-                    logger.error(f"Failed to create mapping for {image['filename']}: {e}")
-                    failed.append({
-                        "filename": image["filename"],
-                        "error": f"Failed to save mapping: {e}"
-                    })
+                    logger.error(
+                        f"Failed to create mapping for {image['filename']}: {e}"
+                    )
+                    failed.append(
+                        {
+                            "filename": image["filename"],
+                            "error": f"Failed to save mapping: {e}",
+                        }
+                    )
             else:
-                failed.append({
-                    "filename": image["filename"],
-                    "error": "Upload failed"
-                })
-        
+                failed.append({"filename": image["filename"], "error": "Upload failed"})
+
         # Apply slideshow settings before closing
         await apply_slideshow_settings(db_client, tv, ip_address, port)
-        
+
         await tv.close()
-        
+
         return (
             len(synced) > 0,
             synced,
@@ -181,7 +183,7 @@ async def sync_add_mode(
             len(gallery_image_ids),
             len(synced),
         )
-        
+
     except Exception as e:
         logger.error(f"Add mode sync failed: {e}")
         return (False, synced, failed, len(gallery_image_ids), len(synced))
@@ -198,7 +200,7 @@ async def sync_reset_mode(
     Reset Mode: Delete gallery images from TV that are no longer in selection,
     upload new gallery images that aren't on TV, keep overlapping ones.
     Preserves manually uploaded images (gallery_image_id is null).
-    
+
     Returns:
         Tuple of (success, synced_filenames, failed_images, total, successful_count)
     """
@@ -206,7 +208,7 @@ async def sync_reset_mode(
     token_file = get_token_file_path()
     synced = []
     failed = []
-    
+
     try:
         # Get gallery images from database
         gallery_images = []
@@ -215,42 +217,44 @@ async def sync_reset_mode(
             if image:
                 gallery_images.append(image)
             else:
-                failed.append({
-                    "filename": f"ID:{gallery_image_id}",
-                    "error": "Gallery image not found in database"
-                })
-        
+                failed.append(
+                    {
+                        "filename": f"ID:{gallery_image_id}",
+                        "error": "Gallery image not found in database",
+                    }
+                )
+
         # Get all app-managed mappings (gallery_image_id is not null)
         all_mappings = await db_client.get_tv_content_mappings(page=1, limit=1000)
         app_managed_mappings = [
             m for m in all_mappings if m.get("gallery_image_id") is not None
         ]
-        
+
         # Identify mappings to delete (not in selection)
         selected_gallery_ids = {img["id"] for img in gallery_images}
         mappings_to_delete = [
-            m for m in app_managed_mappings
+            m
+            for m in app_managed_mappings
             if m["gallery_image_id"] not in selected_gallery_ids
         ]
-        
+
         # Identify images to upload (not on TV)
         existing_gallery_ids = {m["gallery_image_id"] for m in app_managed_mappings}
         images_to_upload = [
-            img for img in gallery_images
-            if img["id"] not in existing_gallery_ids
+            img for img in gallery_images if img["id"] not in existing_gallery_ids
         ]
-        
+
         # Connect to TV
         tv = SamsungTVAsyncArt(host=ip_address, port=port, token_file=token_file)
         await tv.start_listening()
-        
+
         if not tv.is_alive():
             raise Exception("Failed to connect to TV")
-        
+
         if not await tv.in_artmode():
             await tv.close()
             raise Exception("TV is not in art mode")
-        
+
         # Delete unwanted images
         if mappings_to_delete:
             logger.info(f"Deleting {len(mappings_to_delete)} images from TV")
@@ -265,23 +269,22 @@ async def sync_reset_mode(
                         logger.error(f"Failed to delete mapping {mapping['id']}: {e}")
             except Exception as e:
                 logger.error(f"Failed to delete images from TV: {e}")
-        
+
         # Upload new images
         data_dir = get_data_dir()
         for image in images_to_upload:
             relative_path = image["filepath"]
             file_path = data_dir / relative_path
-            
+
             if not file_path.exists():
-                failed.append({
-                    "filename": image["filename"],
-                    "error": "File not found"
-                })
+                failed.append(
+                    {"filename": image["filename"], "error": "File not found"}
+                )
                 continue
-            
+
             # Upload to TV
             content_id = await upload_file(tv, file_path, matte="none")
-            
+
             if content_id:
                 # Create TVContentMapping record
                 try:
@@ -295,22 +298,23 @@ async def sync_reset_mode(
                     await db_client.create_tv_content_mapping(mapping)
                     synced.append(image["filename"])
                 except Exception as e:
-                    logger.error(f"Failed to create mapping for {image['filename']}: {e}")
-                    failed.append({
-                        "filename": image["filename"],
-                        "error": f"Failed to save mapping: {e}"
-                    })
+                    logger.error(
+                        f"Failed to create mapping for {image['filename']}: {e}"
+                    )
+                    failed.append(
+                        {
+                            "filename": image["filename"],
+                            "error": f"Failed to save mapping: {e}",
+                        }
+                    )
             else:
-                failed.append({
-                    "filename": image["filename"],
-                    "error": "Upload failed"
-                })
-        
+                failed.append({"filename": image["filename"], "error": "Upload failed"})
+
         # Apply slideshow settings before closing
         await apply_slideshow_settings(db_client, tv, ip_address, port)
-        
+
         await tv.close()
-        
+
         return (
             len(synced) > 0 or len(mappings_to_delete) > 0,
             synced,
@@ -318,7 +322,7 @@ async def sync_reset_mode(
             len(gallery_image_ids),
             len(synced),
         )
-        
+
     except Exception as e:
         logger.error(f"Reset mode sync failed: {e}")
         return (False, synced, failed, len(gallery_image_ids), len(synced))
@@ -338,7 +342,7 @@ async def apply_slideshow_settings(
         slideshow_enabled = settings.get("slideshow_enabled", False)
         slideshow_duration = settings.get("slideshow_duration", 10)
         slideshow_type = settings.get("slideshow_type", "slideshow")
-        
+
         if slideshow_enabled:
             # type: True for "shuffleslideshow", False for "slideshow"
             slideshow_bool = slideshow_type == "shuffleslideshow"
@@ -356,3 +360,334 @@ async def apply_slideshow_settings(
     except Exception as e:
         logger.warning(f"Failed to apply slideshow settings: {e}")
 
+
+async def sync_add_mode_stream(
+    gallery_image_ids: List[int],
+    ip_address: str,
+    port: int = 8002,
+):
+    """
+    Streaming version of Add Mode that yields progress events.
+
+    Yields events:
+        {"type": "progress", "current": N, "total": M, "filename": "...", "stage": "uploading"}
+        {"type": "complete", "success": bool, "synced": [...], "failed": [...], "total": N, "successful": M}
+    """
+    db_client = DatabaseClient()
+    token_file = get_token_file_path()
+    synced = []
+    failed = []
+
+    try:
+        # Get gallery images from database
+        gallery_images = []
+        for gallery_image_id in gallery_image_ids:
+            image = await db_client.get_gallery_image(gallery_image_id)
+            if image:
+                gallery_images.append(image)
+            else:
+                failed.append(
+                    {
+                        "filename": f"ID:{gallery_image_id}",
+                        "error": "Gallery image not found in database",
+                    }
+                )
+
+        if not gallery_images:
+            yield {
+                "type": "complete",
+                "success": False,
+                "synced": [],
+                "failed": failed,
+                "total": len(gallery_image_ids),
+                "successful": 0,
+            }
+            return
+
+        # Check which images are already on TV
+        images_to_upload = []
+        for image in gallery_images:
+            mapping = await db_client.get_tv_content_by_gallery_image_id(image["id"])
+            if not mapping:
+                images_to_upload.append(image)
+
+        if not images_to_upload:
+            logger.info("All selected images are already on TV")
+            yield {
+                "type": "complete",
+                "success": True,
+                "synced": [],
+                "failed": [],
+                "total": len(gallery_image_ids),
+                "successful": 0,
+            }
+            return
+
+        # Yield initial progress
+        total_to_upload = len(images_to_upload)
+        yield {
+            "type": "progress",
+            "current": 0,
+            "total": total_to_upload,
+            "filename": "",
+            "stage": "connecting",
+        }
+
+        # Connect to TV
+        tv = SamsungTVAsyncArt(host=ip_address, port=port, token_file=token_file)
+        await tv.start_listening()
+
+        if not tv.is_alive():
+            raise Exception("Failed to connect to TV")
+
+        if not await tv.in_artmode():
+            await tv.close()
+            raise Exception("TV is not in art mode")
+
+        # Upload new images with progress updates
+        data_dir = get_data_dir()
+        for i, image in enumerate(images_to_upload):
+            # Yield progress before upload
+            yield {
+                "type": "progress",
+                "current": i + 1,
+                "total": total_to_upload,
+                "filename": image["filename"],
+                "stage": "uploading",
+            }
+
+            # Construct full filepath
+            relative_path = image["filepath"]
+            file_path = data_dir / relative_path
+
+            if not file_path.exists():
+                failed.append(
+                    {"filename": image["filename"], "error": "File not found"}
+                )
+                continue
+
+            # Upload to TV
+            content_id = await upload_file(tv, file_path, matte="none")
+
+            if content_id:
+                # Create TVContentMapping record
+                try:
+                    mapping = {
+                        "gallery_image_id": image["id"],
+                        "tv_content_id": content_id,
+                        "uploaded_at": datetime.utcnow().isoformat(),
+                        "last_verified_at": datetime.utcnow().isoformat(),
+                        "sync_status": "synced",
+                    }
+                    await db_client.create_tv_content_mapping(mapping)
+                    synced.append(image["filename"])
+                except Exception as e:
+                    logger.error(
+                        f"Failed to create mapping for {image['filename']}: {e}"
+                    )
+                    failed.append(
+                        {
+                            "filename": image["filename"],
+                            "error": f"Failed to save mapping: {e}",
+                        }
+                    )
+            else:
+                failed.append({"filename": image["filename"], "error": "Upload failed"})
+
+        # Apply slideshow settings before closing
+        await apply_slideshow_settings(db_client, tv, ip_address, port)
+
+        await tv.close()
+
+        yield {
+            "type": "complete",
+            "success": len(synced) > 0,
+            "synced": synced,
+            "failed": failed,
+            "total": len(gallery_image_ids),
+            "successful": len(synced),
+        }
+
+    except Exception as e:
+        logger.error(f"Add mode sync failed: {e}")
+        yield {
+            "type": "complete",
+            "success": False,
+            "synced": synced,
+            "failed": failed,
+            "total": len(gallery_image_ids),
+            "successful": len(synced),
+        }
+    finally:
+        await db_client.close()
+
+
+async def sync_reset_mode_stream(
+    gallery_image_ids: List[int],
+    ip_address: str,
+    port: int = 8002,
+):
+    """
+    Streaming version of Reset Mode that yields progress events.
+
+    Yields events:
+        {"type": "progress", "current": N, "total": M, "filename": "...", "stage": "uploading"|"deleting"}
+        {"type": "complete", "success": bool, "synced": [...], "failed": [...], "total": N, "successful": M}
+    """
+    db_client = DatabaseClient()
+    token_file = get_token_file_path()
+    synced = []
+    failed = []
+
+    try:
+        # Get gallery images from database
+        gallery_images = []
+        for gallery_image_id in gallery_image_ids:
+            image = await db_client.get_gallery_image(gallery_image_id)
+            if image:
+                gallery_images.append(image)
+            else:
+                failed.append(
+                    {
+                        "filename": f"ID:{gallery_image_id}",
+                        "error": "Gallery image not found in database",
+                    }
+                )
+
+        # Get all app-managed mappings (gallery_image_id is not null)
+        all_mappings = await db_client.get_tv_content_mappings(page=1, limit=1000)
+        app_managed_mappings = [
+            m for m in all_mappings if m.get("gallery_image_id") is not None
+        ]
+
+        # Identify mappings to delete (not in selection)
+        selected_gallery_ids = {img["id"] for img in gallery_images}
+        mappings_to_delete = [
+            m
+            for m in app_managed_mappings
+            if m["gallery_image_id"] not in selected_gallery_ids
+        ]
+
+        # Identify images to upload (not on TV)
+        existing_gallery_ids = {m["gallery_image_id"] for m in app_managed_mappings}
+        images_to_upload = [
+            img for img in gallery_images if img["id"] not in existing_gallery_ids
+        ]
+
+        # Calculate total operations for progress
+        total_operations = len(mappings_to_delete) + len(images_to_upload)
+        current_operation = 0
+
+        # Yield initial progress
+        yield {
+            "type": "progress",
+            "current": 0,
+            "total": total_operations,
+            "filename": "",
+            "stage": "connecting",
+        }
+
+        # Connect to TV
+        tv = SamsungTVAsyncArt(host=ip_address, port=port, token_file=token_file)
+        await tv.start_listening()
+
+        if not tv.is_alive():
+            raise Exception("Failed to connect to TV")
+
+        if not await tv.in_artmode():
+            await tv.close()
+            raise Exception("TV is not in art mode")
+
+        # Delete unwanted images one by one with progress
+        if mappings_to_delete:
+            logger.info(f"Deleting {len(mappings_to_delete)} images from TV")
+            for mapping in mappings_to_delete:
+                current_operation += 1
+                yield {
+                    "type": "progress",
+                    "current": current_operation,
+                    "total": total_operations,
+                    "filename": f"Removing from TV",
+                    "stage": "deleting",
+                }
+                try:
+                    await tv.delete_list([mapping["tv_content_id"]])
+                    await db_client.delete_tv_content_mapping(mapping["id"])
+                except Exception as e:
+                    logger.error(f"Failed to delete mapping {mapping['id']}: {e}")
+
+        # Upload new images with progress
+        data_dir = get_data_dir()
+        for image in images_to_upload:
+            current_operation += 1
+            yield {
+                "type": "progress",
+                "current": current_operation,
+                "total": total_operations,
+                "filename": image["filename"],
+                "stage": "uploading",
+            }
+
+            relative_path = image["filepath"]
+            file_path = data_dir / relative_path
+
+            if not file_path.exists():
+                failed.append(
+                    {"filename": image["filename"], "error": "File not found"}
+                )
+                continue
+
+            # Upload to TV
+            content_id = await upload_file(tv, file_path, matte="none")
+
+            if content_id:
+                # Create TVContentMapping record
+                try:
+                    mapping = {
+                        "gallery_image_id": image["id"],
+                        "tv_content_id": content_id,
+                        "uploaded_at": datetime.utcnow().isoformat(),
+                        "last_verified_at": datetime.utcnow().isoformat(),
+                        "sync_status": "synced",
+                    }
+                    await db_client.create_tv_content_mapping(mapping)
+                    synced.append(image["filename"])
+                except Exception as e:
+                    logger.error(
+                        f"Failed to create mapping for {image['filename']}: {e}"
+                    )
+                    failed.append(
+                        {
+                            "filename": image["filename"],
+                            "error": f"Failed to save mapping: {e}",
+                        }
+                    )
+            else:
+                failed.append({"filename": image["filename"], "error": "Upload failed"})
+
+        # Apply slideshow settings before closing
+        await apply_slideshow_settings(db_client, tv, ip_address, port)
+
+        await tv.close()
+
+        yield {
+            "type": "complete",
+            "success": len(synced) > 0 or len(mappings_to_delete) > 0,
+            "synced": synced,
+            "failed": failed,
+            "total": len(gallery_image_ids),
+            "successful": len(synced),
+        }
+
+    except Exception as e:
+        logger.error(f"Reset mode sync failed: {e}")
+        yield {
+            "type": "complete",
+            "success": False,
+            "synced": synced,
+            "failed": failed,
+            "total": len(gallery_image_ids),
+            "successful": len(synced),
+        }
+    finally:
+        await db_client.close()
