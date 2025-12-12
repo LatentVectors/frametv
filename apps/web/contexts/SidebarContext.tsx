@@ -9,7 +9,7 @@ import React, {
   useMemo,
   ReactNode,
 } from "react";
-import { SourceImageResponse } from "@/lib/api/database";
+import { SourceImageResponse, sourceImagesApi } from "@/lib/api/database";
 
 /**
  * Image data structure from database API (SourceImageResponse)
@@ -78,6 +78,7 @@ interface SidebarContextType {
   setScrollPosition: (position: number) => void;
   openImageModal: (image: ImageData) => void;
   closeImageModal: () => void;
+  refreshImageUsage: (imageIds: number[]) => Promise<void>;
 }
 
 /**
@@ -111,6 +112,7 @@ const defaultContextValue: SidebarContextType = {
   setScrollPosition: () => {},
   openImageModal: () => {},
   closeImageModal: () => {},
+  refreshImageUsage: async () => {},
 };
 
 /**
@@ -277,10 +279,7 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
   // Persist sort order to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem(
-        STORAGE_KEYS.SORT_ORDER,
-        JSON.stringify(sortOrder)
-      );
+      localStorage.setItem(STORAGE_KEYS.SORT_ORDER, JSON.stringify(sortOrder));
     } catch (error) {
       console.error("Error persisting sort order:", error);
     }
@@ -301,10 +300,7 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
   // Persist tag filter to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem(
-        STORAGE_KEYS.TAG_FILTER,
-        JSON.stringify(tagFilter)
-      );
+      localStorage.setItem(STORAGE_KEYS.TAG_FILTER, JSON.stringify(tagFilter));
     } catch (error) {
       console.error("Error persisting tag filter:", error);
     }
@@ -453,6 +449,40 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
     setSelectedImageForModal(null);
   }, []);
 
+  /**
+   * Refresh usage status for specific images without affecting scroll position
+   * Fetches updated data for the given image IDs and updates only those images
+   * in the current images array. Images not in the current view are ignored.
+   */
+  const refreshImageUsage = useCallback(
+    async (imageIds: number[]) => {
+      if (imageIds.length === 0) return;
+
+      // Filter to only include image IDs that are currently in the sidebar
+      const currentImageIds = new Set(images.map((img) => img.id));
+      const idsToRefresh = imageIds.filter((id) => currentImageIds.has(id));
+
+      if (idsToRefresh.length === 0) return;
+
+      try {
+        // Fetch updated data for all images in parallel
+        const updatedImages = await Promise.all(
+          idsToRefresh.map((id) => sourceImagesApi.get(id))
+        );
+
+        // Update images array using functional update to preserve scroll position
+        setImagesState((prevImages) => {
+          const updatedMap = new Map(updatedImages.map((img) => [img.id, img]));
+          return prevImages.map((img) => updatedMap.get(img.id) || img);
+        });
+      } catch (error) {
+        console.error("Error refreshing image usage:", error);
+        // Silently fail - don't disrupt user experience
+      }
+    },
+    [images]
+  );
+
   // Context value - memoized to prevent unnecessary re-renders
   const value: SidebarContextType = useMemo(
     () => ({
@@ -483,6 +513,7 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
       setScrollPosition,
       openImageModal,
       closeImageModal,
+      refreshImageUsage,
     }),
     [
       directoryPath,
@@ -512,6 +543,7 @@ export function SidebarProvider({ children }: SidebarProviderProps) {
       setScrollPosition,
       openImageModal,
       closeImageModal,
+      refreshImageUsage,
     ]
   );
 

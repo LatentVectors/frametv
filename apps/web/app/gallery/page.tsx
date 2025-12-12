@@ -109,6 +109,11 @@ export default function GalleryPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const observerTarget = useRef<HTMLDivElement>(null);
+  const pageRef = useRef(1);
+  const loadImagesRef =
+    useRef<
+      (pageNum: number, append: boolean, tagsFilter?: string[]) => Promise<void>
+    >();
   const { toast } = useToast();
 
   // Count active filters
@@ -145,22 +150,38 @@ export default function GalleryPage() {
         // Calculate hasMore from pages info
         setHasMore(pageNum < data.pages);
         setPage(pageNum);
+        pageRef.current = pageNum;
 
-        // Load tags for each image
-        const newImageTags = new Map<number, Tag[]>(
-          append ? imageTags : undefined
-        );
-        for (const image of data.items) {
-          if (!newImageTags.has(image.id)) {
-            try {
-              const tags = await galleryImagesApi.getTags(image.id);
-              newImageTags.set(image.id, tags);
-            } catch {
-              newImageTags.set(image.id, []);
-            }
+        // Load tags for each image using functional update
+        // First, prepare the tag map structure
+        setImageTags((prevTags) => {
+          const newImageTags = append
+            ? new Map(prevTags)
+            : new Map<number, Tag[]>();
+          return newImageTags;
+        });
+
+        // Load tags asynchronously and update state
+        const tagPromises = data.items.map(async (image) => {
+          try {
+            const tags = await galleryImagesApi.getTags(image.id);
+            return { imageId: image.id, tags };
+          } catch {
+            return { imageId: image.id, tags: [] };
           }
-        }
-        setImageTags(newImageTags);
+        });
+
+        const tagResults = await Promise.all(tagPromises);
+        setImageTags((prevTags) => {
+          const newTags = append ? new Map(prevTags) : new Map<number, Tag[]>();
+          tagResults.forEach(({ imageId, tags }) => {
+            // Only update if we don't already have tags for this image (when appending)
+            if (!append || !newTags.has(imageId)) {
+              newTags.set(imageId, tags);
+            }
+          });
+          return newTags;
+        });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load images");
       } finally {
@@ -168,8 +189,13 @@ export default function GalleryPage() {
         setLoadingMore(false);
       }
     },
-    [imageTags]
+    []
   );
+
+  // Keep ref in sync with loadImages
+  useEffect(() => {
+    loadImagesRef.current = loadImages;
+  }, [loadImages]);
 
   const loadTVMappings = useCallback(async () => {
     try {
@@ -190,6 +216,10 @@ export default function GalleryPage() {
   }, []);
 
   useEffect(() => {
+    // Reset pagination state when filters change
+    setPage(1);
+    pageRef.current = 1;
+    setHasMore(true);
     loadImages(1, false, selectedTags);
     loadTVMappings();
   }, [loadTVMappings, selectedTags]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -198,8 +228,15 @@ export default function GalleryPage() {
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loadingMore && !loading) {
-          loadImages(page + 1, true, selectedTags);
+        if (
+          entries[0].isIntersecting &&
+          hasMore &&
+          !loadingMore &&
+          !loading &&
+          loadImagesRef.current
+        ) {
+          const nextPage = pageRef.current + 1;
+          loadImagesRef.current(nextPage, true, selectedTags);
         }
       },
       { threshold: 0.1 }
@@ -215,7 +252,7 @@ export default function GalleryPage() {
         observer.unobserve(currentTarget);
       }
     };
-  }, [hasMore, loadingMore, loading, page, loadImages, selectedTags]);
+  }, [hasMore, loadingMore, loading, selectedTags]);
 
   // Convert filepath to a URL that can be displayed
   const getImageUrl = (filepath: string) => {
@@ -938,8 +975,8 @@ export default function GalleryPage() {
             </div>
           )}
 
-          {/* Observer target for infinite scroll */}
-          <div ref={observerTarget} className="h-4" />
+          {/* Observer target for infinite scroll - only render when there's more to load */}
+          {hasMore && <div ref={observerTarget} className="h-20 w-full" />}
 
           {/* End of gallery message */}
           {!hasMore && sortedImages.length > 0 && (

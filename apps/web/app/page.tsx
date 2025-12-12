@@ -36,7 +36,7 @@ function HomeContent() {
   const { toast } = useToast();
 
   // Sidebar state from context
-  const { sidebarWidth, setSidebarWidth } = useSidebar();
+  const { sidebarWidth, setSidebarWidth, refreshImageUsage } = useSidebar();
 
   // Resizable sidebar hook
   const { width, isResizing, handleMouseDown } = useResizableSidebar({
@@ -47,12 +47,13 @@ function HomeContent() {
   });
 
   const canvasAreaRef = useRef<HTMLDivElement>(null);
-  const [previewSize, setPreviewSize] = useState<{ width: number; height: number }>(
-    () => ({
-      width: CANVAS_WIDTH,
-      height: CANVAS_HEIGHT,
-    })
-  );
+  const [previewSize, setPreviewSize] = useState<{
+    width: number;
+    height: number;
+  }>(() => ({
+    width: CANVAS_WIDTH,
+    height: CANVAS_HEIGHT,
+  }));
 
   const handleTemplateChange = (template: Template) => {
     setSelectedTemplate(template);
@@ -114,25 +115,27 @@ function HomeContent() {
         return {
           slot_number: index,
           source_image_id: assignment?.sourceImageId || null,
-          transform_data: assignment ? {
-            cropX: assignment.cropX,
-            cropY: assignment.cropY,
-            cropWidth: assignment.cropWidth,
-            cropHeight: assignment.cropHeight,
-            rotation: assignment.rotation,
-            mirrorX: assignment.mirrorX,
-            brightness: assignment.brightness,
-            contrast: assignment.contrast,
-            saturation: assignment.saturation,
-            hue: assignment.hue,
-            temperature: assignment.temperature,
-            tint: assignment.tint,
-            filtersEnabled: assignment.filtersEnabled,
-            blackWhiteEnabled: assignment.blackWhiteEnabled,
-            sepiaEnabled: assignment.sepiaEnabled,
-            monochromeEnabled: assignment.monochromeEnabled,
-            monochromeColor: assignment.monochromeColor,
-          } : null,
+          transform_data: assignment
+            ? {
+                cropX: assignment.cropX,
+                cropY: assignment.cropY,
+                cropWidth: assignment.cropWidth,
+                cropHeight: assignment.cropHeight,
+                rotation: assignment.rotation,
+                mirrorX: assignment.mirrorX,
+                brightness: assignment.brightness,
+                contrast: assignment.contrast,
+                saturation: assignment.saturation,
+                hue: assignment.hue,
+                temperature: assignment.temperature,
+                tint: assignment.tint,
+                filtersEnabled: assignment.filtersEnabled,
+                blackWhiteEnabled: assignment.blackWhiteEnabled,
+                sepiaEnabled: assignment.sepiaEnabled,
+                monochromeEnabled: assignment.monochromeEnabled,
+                monochromeColor: assignment.monochromeColor,
+              }
+            : null,
         };
       });
 
@@ -158,6 +161,16 @@ function HomeContent() {
         });
         // Clear dirty flag after successful save
         setIsDirty(false);
+
+        // Extract source image IDs from imageAssignments and refresh their usage status
+        const sourceImageIds = Array.from(imageAssignments.values())
+          .map((assignment) => assignment.sourceImageId)
+          .filter((id): id is number => typeof id === "number" && id > 0);
+
+        if (sourceImageIds.length > 0) {
+          // Refresh usage status for affected images without affecting scroll position
+          await refreshImageUsage(sourceImageIds);
+        }
       } else {
         throw new Error(result.error || "Failed to save image");
       }
