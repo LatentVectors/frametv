@@ -361,6 +361,10 @@ export default function GalleryPage() {
     });
   };
 
+  const handleDeselectAll = () => {
+    setSelectedImages(new Set());
+  };
+
   const handleRefreshTVState = async () => {
     try {
       setRefreshing(true);
@@ -538,6 +542,16 @@ export default function GalleryPage() {
     return sortOrder === "newest" ? dateB - dateA : dateA - dateB;
   });
 
+  const handleSelectAll = () => {
+    const allVisibleIds = new Set(sortedImages.map((img) => img.id));
+    setSelectedImages(allVisibleIds);
+  };
+
+  // Check if all visible images are selected
+  const allVisibleSelected =
+    sortedImages.length > 0 &&
+    sortedImages.every((img) => selectedImages.has(img.id));
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -586,6 +600,15 @@ export default function GalleryPage() {
           )}
         </Button>
 
+        {sortedImages.length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={allVisibleSelected ? handleDeselectAll : handleSelectAll}
+          >
+            {allVisibleSelected ? "Deselect All" : "Select All"}
+          </Button>
+        )}
         <Button
           variant="outline"
           onClick={handleRefreshTVState}
